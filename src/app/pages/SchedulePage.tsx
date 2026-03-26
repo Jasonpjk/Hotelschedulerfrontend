@@ -122,7 +122,7 @@ function LegendChip({ code }: { code: ShiftCode }) {
   );
 }
 
-/** 셀용 배�� */
+/** 셀용 배 */
 function ShiftBadge({ code, zoom = 1 }: { code: ShiftCode; zoom?: number }) {
   const s = SHIFT[code];
   return (
@@ -515,14 +515,28 @@ export default function SchedulePage() {
   
   // 확정 처리
   function handleFinalize() {
-    // 실제로는 monthDataMap 업데이트 필요
-    alert("버전이 확정되었습니다.");
+    setMonthDataMap(prev => ({
+      ...prev,
+      [selectedMonth]: {
+        ...prev[selectedMonth],
+        versions: prev[selectedMonth].versions.map(v => 
+          v.id === currentVersionId ? { ...v, isFinalized: true } : v
+        ),
+      },
+    }));
   }
   
   // 편집 재개 (확정 해제)
   function handleResumeEditing() {
-    // 실제로는 monthDataMap 업데이트 필요
-    alert("편집이 재개되었습니다.");
+    setMonthDataMap(prev => ({
+      ...prev,
+      [selectedMonth]: {
+        ...prev[selectedMonth],
+        versions: prev[selectedMonth].versions.map(v => 
+          v.id === currentVersionId ? { ...v, isFinalized: false } : v
+        ),
+      },
+    }));
   }
   
   // 새 버전 생성
@@ -531,10 +545,22 @@ export default function SchedulePage() {
     const monthNum = parseInt(selectedMonth.split("-")[1]);
     const nextVersionNum = versions.length;
     const newVersionId = `v${monthNum}.${nextVersionNum}`;
+    const newVersionName = `v${monthNum}.${nextVersionNum}`;
     
-    alert(`새 버전 ${newVersionId}이(가) 생성되었습니다.`);
+    // 새 버전 추가
+    setMonthDataMap(prev => ({
+      ...prev,
+      [selectedMonth]: {
+        ...prev[selectedMonth],
+        versions: [
+          ...prev[selectedMonth].versions,
+          { id: newVersionId, name: newVersionName, isFinalized: false }
+        ],
+      },
+    }));
     
-    // 실제로는 monthDataMap 업데이트 필요
+    // 새 버전으로 자동 전환
+    setCurrentVersionId(newVersionId);
   }
   
   // AI 자연어 조정 적용

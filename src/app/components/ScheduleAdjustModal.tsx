@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { useLang } from "../context/LangContext";
 import { DT } from "../i18n";
 
@@ -175,9 +175,9 @@ export default function ScheduleAdjustModal({ open, onClose, empName, day, curre
           >
             {t.schedAdjustTitle}
           </DialogTitle>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 6, fontFamily: "'Inter', sans-serif" }}>
+          <DialogDescription style={{ fontSize: 11, color: C.muted, marginTop: 6, fontFamily: "'Inter', sans-serif" }}>
             {empName} · 3월 {day}일 ({dow}){isWeekend && " · 주말"}
-          </div>
+          </DialogDescription>
         </DialogHeader>
 
         {/* Body */}
