@@ -1,0 +1,25 @@
+                             <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
+                               {acc.status === "대기중" && (
+                                 <button
+                                   onClick={() => {
+                                     setSelectedPendingAccount(acc);
+                                     setManageAccountModal(true);
+                                   }}
+                                   style={{
+                                     padding: "5px 14px",
+                                     backgroundColor: C.navy,
+                                     color: "#EAE0CC",
+                                     border: "none",
+                                     borderRadius: 3,
+                                     fontSize: 10,
+                                     fontWeight: 600,
+                                     cursor: "pointer",
+                                   }}
+                                 >
+                                   관리
+                                 </button>
+                               )}
+                               {acc.status !== "대기중" && (
+                                 <span style={{ fontSize: 10, color: C.muted }}>-</span>
+                               )}
+                             </td>
