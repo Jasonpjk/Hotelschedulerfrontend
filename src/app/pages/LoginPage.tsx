@@ -1,6 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import lotteLogo from "figma:asset/b5f675b5ca48c50750fc1b535604b775fca63344.png";
 import hotelLobbyImage from "figma:asset/c0ca28a090159584b398e8d033c1e842d930a4fb.png";
 
@@ -24,7 +23,7 @@ const LOTTE_HOTELS = [
 
 const GRADES = ["엘크루", "주니어", "L1-A", "L1-C", "L1-D", "L2-A", "L2-C", "L3", "L4"];
 
-/* ══════════════════════════════════════════════��═══════════
+/* ═════════════════════════════════════════════════════════
    i18n DICTIONARY
 ══════════════════════════════════════════════════════════ */
 type Lang = "ko" | "en" | "ja" | "ru" | "vi";
@@ -305,7 +304,7 @@ const T: Record<
 /* ══════════════════════════════════════════════════════════
    MODAL COMPONENT
 ══════════════════════════════════════════════════════════ */
-function Modal({ open, onClose, children, width = 500 }: { open: boolean; onClose: () => void; children: React.ReactNode; width?: number }) {
+function Modal({ open, onClose, children, width = 500 }: { open: boolean; onClose: () => void; children: ReactNode; width?: number }) {
   if (!open) return null;
   
   return (
@@ -357,7 +356,7 @@ function ForgotPasswordModal({ open, onClose, lang }: { open: boolean; onClose: 
   
   const t = T[lang];
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setTimeout(() => {
@@ -474,7 +473,7 @@ function SignupModal({ open, onClose, lang }: { open: boolean; onClose: () => vo
   
   const t = T[lang];
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     
     if (password !== passwordConfirm) {
@@ -814,7 +813,7 @@ function LangSwitcher({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => v
   );
 }
 
-/* ══════════════════════════════════════════════════════════
+/* ═════════════════════════════════��════════════════════════
    MAIN LOGIN PAGE
 ══════════════════════════════════════════════════════════ */
 export default function LoginPage() {
@@ -833,7 +832,7 @@ export default function LoginPage() {
 
   const t = T[lang];
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setTimeout(() => {

@@ -1,6 +1,7 @@
  import { useState } from "react";
 import type React from "react";
 import AppLayout from "../components/layout/AppLayout";
+import { useToast } from "../context/ToastContext";
 
 /* ══════════════════════════════════════════════════════════
    COLOR TOKENS
@@ -63,6 +64,17 @@ interface Policy {
   description: string;
   type: "필수" | "권장";
   enabled: boolean;
+  // 숫자 조정 가능한 정책용
+  useNumeric?: boolean; // 숫자 관리 여부
+  numericValue?: number;
+  numericLabel?: string; // 예: "휴무 일수", "최대 연속 근무일"
+  numericUnit?: string; // 예: "일", "명", "회"
+  numericMin?: number;
+  numericMax?: number;
+  // 적용 방식 (이 값에 따라 type이 자동으로 결정됨)
+  enforcementMode: "강제 반영" | "권고 경고";
+  // 추가 옵션 (배치 방식 등)
+  placementMode?: "전월 말일 OFF 우선" | "익월 첫날 OFF 우선" | "자동 최적화" | "분산 배치 우선";
 }
 
 interface ShiftMinimum {
@@ -101,9 +113,16 @@ const INITIAL_POLICIES: Policy[] = [
   {
     id: 1,
     title: "월요일 기준 14일 동안 휴무 4회 필수",
-    description: "롤링 14일이 아닌 월요일 시작 14일 블록 기준으로 휴무 4회 반드시 보장",
+    description: "롤링 14일이 아닌 월요일 시작 14일 블록 기준으로 휴무 반드시 보장",
     type: "필수",
     enabled: true,
+    useNumeric: true,
+    numericValue: 4,
+    numericLabel: "휴무 일수",
+    numericUnit: "회",
+    numericMin: 2,
+    numericMax: 6,
+    enforcementMode: "강제 반영",
   },
   {
     id: 2,
@@ -111,13 +130,22 @@ const INITIAL_POLICIES: Policy[] = [
     description: "각 조에 설정된 최소 인원은 스케줄 생성 시 반드시 충족되어야 함",
     type: "필수",
     enabled: true,
+    useNumeric: false,
+    enforcementMode: "강제 반영",
   },
   {
     id: 3,
     title: "각 조별 인차지 1명 이상 필수",
-    description: "오전조/오후조/야간조/중간조마다 최소 1명 이상의 인차지 배치 필수",
+    description: "오전조/오후조/야간조/중간조마다 최소 인차지 배치 필수",
     type: "필수",
     enabled: true,
+    useNumeric: true,
+    numericValue: 1,
+    numericLabel: "최소 인차지 인원",
+    numericUnit: "명",
+    numericMin: 1,
+    numericMax: 3,
+    enforcementMode: "강제 반영",
   },
   {
     id: 4,
@@ -125,13 +153,32 @@ const INITIAL_POLICIES: Policy[] = [
     description: "해당 월에 야간조로 운영되는 직원은 그 월 안에서는 다른 조로 전환하지 않음",
     type: "필수",
     enabled: true,
+    useNumeric: false,
+    enforcementMode: "강제 반영",
   },
   {
     id: 5,
-    title: "전월 야간조 담당자 익월 전환 시 첫 2일 OFF 강제 배정",
-    description: "전월 야간조 직원이 익월에 타 조로 전환될 경우 익월 첫 2일은 OFF 강제 배정 후 투입",
+    title: "전월 야간조 종료자 전환 휴식",
+    description: "전월 야간조 직원이 익월에 타 조로 전환될 경우 익월 첫 N일은 OFF 강제 배정 후 투입",
     type: "필수",
     enabled: true,
+    useNumeric: true,
+    numericValue: 2,
+    numericLabel: "OFF 일수",
+    numericUnit: "일",
+    numericMin: 1,
+    numericMax: 5,
+    enforcementMode: "강제 반영",
+  },
+  {
+    id: 11,
+    title: "다음 달 야간조 신규 진입자 전환 휴식",
+    description: "다음 달 야간조에 새로 진입하는 직원이 이번 달 야간조가 아니었던 경우, 진입 전 휴식 부여. 신규 진입자가 여러 명일 경우 전월 말일과 익월 첫날로 자동 분산하여 최소 야간 인원 유지",
+    type: "필수",
+    enabled: true,
+    useNumeric: false,
+    enforcementMode: "강제 반영",
+    placementMode: "분산 배치 우선",
   },
   {
     id: 6,
@@ -139,6 +186,8 @@ const INITIAL_POLICIES: Policy[] = [
     description: "오전조 ↔ 오후조 ↔ 중간조 전환 시 별도 최소 휴무일 강제 규칙 적용하지 않음",
     type: "필수",
     enabled: true,
+    useNumeric: false,
+    enforcementMode: "강제 반영",
   },
   {
     id: 7,
@@ -146,6 +195,17 @@ const INITIAL_POLICIES: Policy[] = [
     description: "SL(여성 보건휴가)은 연속 날짜로 신청할 수 없도록 차단",
     type: "필수",
     enabled: true,
+    useNumeric: false,
+    enforcementMode: "강제 반영",
+  },
+  {
+    id: 10,
+    title: "SL은 여직원만 월 1회 사용 가능",
+    description: "SL(여성 보건휴가)은 여직원에게만 월 1회 사용 가능하며, 남직원은 SL 자동 배정 및 사용이 불가능합니다. 자동 배정 시 여직원은 SL 우선 배정 후 소진 시 연차로 전환되며, 남직원은 처음부터 연차만 배정됩니다.",
+    type: "필수",
+    enabled: true,
+    useNumeric: false,
+    enforcementMode: "강제 반영",
   },
   {
     id: 8,
@@ -153,13 +213,36 @@ const INITIAL_POLICIES: Policy[] = [
     description: "강제 차단이 아닌 권장 규칙, 위반 시 경고 표시",
     type: "권장",
     enabled: true,
+    useNumeric: false,
+    enforcementMode: "권고 경고",
   },
   {
     id: 9,
     title: "최대 연속 근무 6일 초과 시 경고",
-    description: "6일 초과를 절대 금지하지는 않으나 경고 문구 표시 및 검토 필요",
+    description: "초과를 절대 금지하지는 않으나 경고 문구 표시 및 검토 필요",
     type: "권장",
     enabled: true,
+    useNumeric: true,
+    numericValue: 6,
+    numericLabel: "최대 연속 근무일",
+    numericUnit: "일",
+    numericMin: 5,
+    numericMax: 10,
+    enforcementMode: "권고 경고",
+  },
+  {
+    id: 12,
+    title: "전월 근무강도 회복 반영",
+    description: "전월 근무 패턴을 분석하여 근무강도 점수를 산정하고, 회복이 필요한 직원에게 다음 달 스케줄 생성 시 우선적으로 휴무를 배정합니다. 5일 연속 근무=+2점, 6일 이상=+4점, 오후조→오전조 전환=+3점, 야간조 빠른 전환=+3점. 총점 6점 이상='회복 필요', 3-5점='주의', 0-2점='일반'로 분류됩니다.",
+    type: "권장",
+    enabled: true,
+    useNumeric: true,
+    numericValue: 6,
+    numericLabel: "회복 필요 기준 점수",
+    numericUnit: "점",
+    numericMin: 4,
+    numericMax: 10,
+    enforcementMode: "권고 경고",
   },
 ];
 
@@ -260,6 +343,7 @@ function Modal({
    MAIN PAGE
 ══════════════════════════════════════════════════════════ */
 export default function SettingsPage() {
+  const { showToast } = useToast();
   const [pendingAccounts, setPendingAccounts] = useState<PendingAccount[]>(MOCK_PENDING_ACCOUNTS);
   const [activeAccounts, setActiveAccounts] = useState<ActiveAccount[]>(MOCK_ACTIVE_ACCOUNTS);
   const [policies, setPolicies] = useState<Policy[]>(INITIAL_POLICIES);
@@ -279,6 +363,11 @@ export default function SettingsPage() {
   // 정책 추가 모달
   const [addPolicyModal, setAddPolicyModal] = useState(false);
   const [addPolicyType, setAddPolicyType] = useState<"필수" | "권장">("필수");
+  const [newPolicyUseNumeric, setNewPolicyUseNumeric] = useState(false);
+  const [newPolicyNumericValue, setNewPolicyNumericValue] = useState(1);
+  const [newPolicyNumericLabel, setNewPolicyNumericLabel] = useState("");
+  const [newPolicyNumericUnit, setNewPolicyNumericUnit] = useState("일");
+  const [newPolicyEnforcementMode, setNewPolicyEnforcementMode] = useState<"강제 반영" | "권고 경고">("강제 반영");
   
   // 최소 조별 인원 확정 상태
   const [shiftMinimumsFinalized, setShiftMinimumsFinalized] = useState(false);
@@ -302,7 +391,6 @@ export default function SettingsPage() {
   const [rejectAccountModal, setRejectAccountModal] = useState(false);
   const [selectedPendingAccount, setSelectedPendingAccount] = useState<PendingAccount | null>(null);
   const [manageAccountModal, setManageAccountModal] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // 회원가입 승인/거절
   const handleApprove = (id: number) => {
@@ -326,17 +414,12 @@ export default function SettingsPage() {
       // 대기 목록에서 제거
       setPendingAccounts(prev => prev.filter(acc => acc.id !== id));
       
-      // 성공 메시지 표시
-      setSuccessMessage(`${account.name}님의 회원가입이 승인되었습니다. 활성 계정에 추가되었습니다.`);
+      // 승인 Toast 표시
+      showToast({ type: "success", title: "승인 완료", message: `${account.name}님의 회원가입이 승인되었습니다.` });
       
       // 모달 닫기
       setManageAccountModal(false);
       setSelectedPendingAccount(null);
-      
-      // 3초 후 성공 메시지 제거
-      setTimeout(() => {
-        setSuccessMessage(null);
-      }, 3000);
     }
   };
 
@@ -346,25 +429,45 @@ export default function SettingsPage() {
     // 대기 목록에서 제거
     setPendingAccounts(prev => prev.filter(acc => acc.id !== id));
     
-    // 성공 메시지 표시
+    // 거절 Toast 표시
     if (account) {
-      setSuccessMessage(`${account.name}님의 회원가입 신청이 거절되었습니다.`);
+      showToast({ type: "info", title: "거절 완료", message: `${account.name}님의 회원가입 신청이 거절되었습니다.` });
     }
     
     // 모달 닫기
     setManageAccountModal(false);
     setSelectedPendingAccount(null);
-    
-    // 3초 후 성공 메시지 제거
-    setTimeout(() => {
-      setSuccessMessage(null);
-    }, 3000);
   };
 
   // 정책 토글
   const handleTogglePolicy = (id: number) => {
     setPolicies(prev =>
       prev.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p)
+    );
+  };
+  
+  // 정책 숫자 값 변경
+  const handlePolicyNumericChange = (id: number, value: number) => {
+    setPolicies(prev =>
+      prev.map(p => p.id === id ? { ...p, numericValue: value } : p)
+    );
+  };
+  
+  // 정책 적용 방식 변경 (자동으로 type도 변경)
+  const handleEnforcementModeChange = (id: number, mode: "강제 반영" | "권고 경고") => {
+    setPolicies(prev =>
+      prev.map(p => p.id === id ? { 
+        ...p, 
+        enforcementMode: mode,
+        type: mode === "강제 반영" ? "필수" : "권장"
+      } : p)
+    );
+  };
+  
+  // 정책 배치 방식 변경
+  const handlePlacementModeChange = (id: number, mode: "전월 말일 OFF 우선" | "익월 첫날 OFF 우선" | "자동 최적화" | "분산 배치 우선") => {
+    setPolicies(prev =>
+      prev.map(p => p.id === id ? { ...p, placementMode: mode } : p)
     );
   };
   
@@ -411,12 +514,25 @@ export default function SettingsPage() {
       id: Date.now(),
       title: editForm.title,
       description: editForm.description,
-      type: addPolicyType,
+      type: newPolicyEnforcementMode === "강제 반영" ? "필수" : "권장", // enforcementMode에 따라 자동 결정
       enabled: true,
+      useNumeric: newPolicyUseNumeric,
+      numericValue: newPolicyUseNumeric ? newPolicyNumericValue : undefined,
+      numericLabel: newPolicyUseNumeric ? newPolicyNumericLabel : undefined,
+      numericUnit: newPolicyUseNumeric ? newPolicyNumericUnit : undefined,
+      numericMin: newPolicyUseNumeric ? 1 : undefined,
+      numericMax: newPolicyUseNumeric ? 20 : undefined,
+      enforcementMode: newPolicyEnforcementMode,
     };
     setPolicies(prev => [...prev, newPolicy]);
     setAddPolicyModal(false);
+    // 상태 초기화
     setEditForm({ title: "", description: "", type: "필수" });
+    setNewPolicyUseNumeric(false);
+    setNewPolicyNumericValue(1);
+    setNewPolicyNumericLabel("");
+    setNewPolicyNumericUnit("일");
+    setNewPolicyEnforcementMode("강제 반영");
   };
 
   // 최소 인원 변경
@@ -882,8 +998,12 @@ export default function SettingsPage() {
                   </div>
                   <button
                     onClick={() => {
-                      setAddPolicyType("필수");
                       setEditForm({ title: "", description: "", type: "필수" });
+                      setNewPolicyUseNumeric(false);
+                      setNewPolicyNumericValue(1);
+                      setNewPolicyNumericLabel("");
+                      setNewPolicyNumericUnit("일");
+                      setNewPolicyEnforcementMode("강제 반영");
                       setAddPolicyModal(true);
                     }}
                     style={{
@@ -919,9 +1039,136 @@ export default function SettingsPage() {
                           <div style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 6 }}>
                             {policy.title}
                           </div>
-                          <div style={{ fontSize: 10, color: C.charcoal, lineHeight: 1.6 }}>
+                          <div style={{ fontSize: 10, color: C.charcoal, lineHeight: 1.6, marginBottom: 12 }}>
                             {policy.description}
                           </div>
+                          
+                          {/* 숫자 조정 컨트롤 */}
+                          {policy.numericValue !== undefined && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                              <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>{policy.numericLabel}:</span>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <button
+                                  onClick={() => handlePolicyNumericChange(policy.id, Math.max(policy.numericMin || 1, (policy.numericValue || 1) - 1))}
+                                  disabled={policy.numericValue <= (policy.numericMin || 1)}
+                                  style={{
+                                    width: 24,
+                                    height: 24,
+                                    backgroundColor: C.white,
+                                    border: `1px solid ${C.border}`,
+                                    borderRadius: 3,
+                                    fontSize: 14,
+                                    fontWeight: 600,
+                                    color: C.charcoal,
+                                    cursor: policy.numericValue <= (policy.numericMin || 1) ? "not-allowed" : "pointer",
+                                    opacity: policy.numericValue <= (policy.numericMin || 1) ? 0.4 : 1,
+                                  }}
+                                >
+                                  −
+                                </button>
+                                <div style={{
+                                  minWidth: 32,
+                                  textAlign: "center",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: C.navy,
+                                  backgroundColor: C.goldBg,
+                                  border: `1px solid ${C.goldBorder}`,
+                                  borderRadius: 3,
+                                  padding: "4px 8px",
+                                }}>
+                                  {policy.numericValue}
+                                </div>
+                                <button
+                                  onClick={() => handlePolicyNumericChange(policy.id, Math.min(policy.numericMax || 10, (policy.numericValue || 1) + 1))}
+                                  disabled={policy.numericValue >= (policy.numericMax || 10)}
+                                  style={{
+                                    width: 24,
+                                    height: 24,
+                                    backgroundColor: C.white,
+                                    border: `1px solid ${C.border}`,
+                                    borderRadius: 3,
+                                    fontSize: 14,
+                                    fontWeight: 600,
+                                    color: C.charcoal,
+                                    cursor: policy.numericValue >= (policy.numericMax || 10) ? "not-allowed" : "pointer",
+                                    opacity: policy.numericValue >= (policy.numericMax || 10) ? 0.4 : 1,
+                                  }}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* 적용 방식 */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                            <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>적용 방식:</span>
+                            <select
+                              value={policy.enforcementMode}
+                              onChange={(e) => handleEnforcementModeChange(policy.id, e.target.value as any)}
+                              style={{
+                                fontSize: 10,
+                                padding: "4px 8px",
+                                border: `1px solid ${C.border}`,
+                                borderRadius: 3,
+                                backgroundColor: C.white,
+                                color: C.navy,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <option value="강제 반영">강제 반영</option>
+                              <option value="권고 경고">권고 경고</option>
+                            </select>
+                            <span style={{ fontSize: 9, color: C.muted, fontStyle: "italic" }}>
+                              {policy.enforcementMode === "강제 반영" ? "(필수 정책)" : "(권장 정책)"}
+                            </span>
+                          </div>
+                          
+                          {/* 배치 방식 (신규 야간조 진입자 전환 휴식 정책만) */}
+                          {policy.placementMode && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                              <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>배치 방식:</span>
+                              <select
+                                value={policy.placementMode}
+                                onChange={(e) => handlePlacementModeChange(policy.id, e.target.value as any)}
+                                style={{
+                                  fontSize: 10,
+                                  padding: "4px 8px",
+                                  border: `1px solid ${C.border}`,
+                                  borderRadius: 3,
+                                  backgroundColor: C.white,
+                                  color: C.navy,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <option value="전월 말일 OFF 우선">전월 말일 OFF 우선</option>
+                                <option value="익월 첫날 OFF 우선">익월 첫날 OFF 우선</option>
+                                <option value="자동 최적화">자동 최적화</option>
+                                <option value="분산 배치 우선">분산 배치 우선 (권장)</option>
+                              </select>
+                            </div>
+                          )}
+                          
+                          {/* 신규 진입자 분산 배치 로직 안내 (정책 ID 11) */}
+                          {policy.id === 11 && (
+                            <div style={{
+                              marginTop: 10,
+                              padding: 10,
+                              backgroundColor: C.pendingBg,
+                              border: `1px solid ${C.pendingBorder}`,
+                              borderRadius: 3,
+                            }}>
+                              <div style={{ fontSize: 9, color: C.pending, fontWeight: 600, marginBottom: 4 }}>교차월 야간 인원 유지 최적화</div>
+                              <div style={{ fontSize: 9, color: C.charcoal, lineHeight: 1.5 }}>
+                                • 신규 야간조 진입자는 진입 전 휴식을 반드시 부여<br/>
+                                • 휴식은 전월 말일 OFF 또는 익월 첫날 OFF 중에서 배치<br/>
+                                • 신규 진입자가 2명 이상이면 한쪽 날짜에 몰지 않고 자동 분산<br/>
+                                • 두 날짜 모두 야간 최소인원을 만족하는 조합을 우선 선택<br/>
+                                • 확정된 전월 스케줄은 자동 수정하지 않고 관리자 선택으로 처리
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
@@ -998,8 +1245,12 @@ export default function SettingsPage() {
                   </div>
                   <button
                     onClick={() => {
-                      setAddPolicyType("권장");
                       setEditForm({ title: "", description: "", type: "권장" });
+                      setNewPolicyUseNumeric(false);
+                      setNewPolicyNumericValue(1);
+                      setNewPolicyNumericLabel("");
+                      setNewPolicyNumericUnit("일");
+                      setNewPolicyEnforcementMode("권고 경고");
                       setAddPolicyModal(true);
                     }}
                     style={{
@@ -1035,8 +1286,90 @@ export default function SettingsPage() {
                           <div style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 6 }}>
                             {policy.title}
                           </div>
-                          <div style={{ fontSize: 10, color: C.charcoal, lineHeight: 1.6 }}>
+                          <div style={{ fontSize: 10, color: C.charcoal, lineHeight: 1.6, marginBottom: 12 }}>
                             {policy.description}
+                          </div>
+                          
+                          {/* 숫자 조정 컨트롤 */}
+                          {policy.numericValue !== undefined && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                              <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>{policy.numericLabel}:</span>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <button
+                                  onClick={() => handlePolicyNumericChange(policy.id, Math.max(policy.numericMin || 1, (policy.numericValue || 1) - 1))}
+                                  disabled={policy.numericValue <= (policy.numericMin || 1)}
+                                  style={{
+                                    width: 24,
+                                    height: 24,
+                                    backgroundColor: C.white,
+                                    border: `1px solid ${C.border}`,
+                                    borderRadius: 3,
+                                    fontSize: 14,
+                                    fontWeight: 600,
+                                    color: C.charcoal,
+                                    cursor: policy.numericValue <= (policy.numericMin || 1) ? "not-allowed" : "pointer",
+                                    opacity: policy.numericValue <= (policy.numericMin || 1) ? 0.4 : 1,
+                                  }}
+                                >
+                                  −
+                                </button>
+                                <div style={{
+                                  minWidth: 32,
+                                  textAlign: "center",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: C.navy,
+                                  backgroundColor: C.goldBg,
+                                  border: `1px solid ${C.goldBorder}`,
+                                  borderRadius: 3,
+                                  padding: "4px 8px",
+                                }}>
+                                  {policy.numericValue}
+                                </div>
+                                <button
+                                  onClick={() => handlePolicyNumericChange(policy.id, Math.min(policy.numericMax || 10, (policy.numericValue || 1) + 1))}
+                                  disabled={policy.numericValue >= (policy.numericMax || 10)}
+                                  style={{
+                                    width: 24,
+                                    height: 24,
+                                    backgroundColor: C.white,
+                                    border: `1px solid ${C.border}`,
+                                    borderRadius: 3,
+                                    fontSize: 14,
+                                    fontWeight: 600,
+                                    color: C.charcoal,
+                                    cursor: policy.numericValue >= (policy.numericMax || 10) ? "not-allowed" : "pointer",
+                                    opacity: policy.numericValue >= (policy.numericMax || 10) ? 0.4 : 1,
+                                  }}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* 적용 방식 */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                            <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>적용 방식:</span>
+                            <select
+                              value={policy.enforcementMode}
+                              onChange={(e) => handleEnforcementModeChange(policy.id, e.target.value as any)}
+                              style={{
+                                fontSize: 10,
+                                padding: "4px 8px",
+                                border: `1px solid ${C.border}`,
+                                borderRadius: 3,
+                                backgroundColor: C.white,
+                                color: C.navy,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <option value="강제 반영">강제 반영</option>
+                              <option value="권고 경고">권고 경고</option>
+                            </select>
+                            <span style={{ fontSize: 9, color: C.muted, fontStyle: "italic" }}>
+                              {policy.enforcementMode === "강제 반영" ? "(필수 정책)" : "(권장 정책)"}
+                            </span>
                           </div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -1152,25 +1485,58 @@ export default function SettingsPage() {
                         최소 인원 설정
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={shift.minimum}
-                        onChange={(e) => handleUpdateMinimum(shift.shift, Number(e.target.value))}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {/* 스텝퍼 컨트롤 */}
+                      <button
+                        onClick={() => handleUpdateMinimum(shift.shift, Math.max(1, shift.minimum - 1))}
+                        disabled={shift.minimum <= 1}
                         style={{
-                          width: 80,
-                          padding: "8px 12px",
+                          width: 28,
+                          height: 28,
+                          backgroundColor: C.white,
                           border: `1px solid ${C.border}`,
                           borderRadius: 3,
-                          fontSize: 12,
+                          fontSize: 16,
                           fontWeight: 600,
-                          textAlign: "center",
-                          fontFamily: "'Inter', sans-serif",
+                          color: C.charcoal,
+                          cursor: shift.minimum <= 1 ? "not-allowed" : "pointer",
+                          opacity: shift.minimum <= 1 ? 0.4 : 1,
                         }}
-                      />
-                      <span style={{ fontSize: 11, fontWeight: 600, color: C.charcoal }}>명</span>
+                      >
+                        −
+                      </button>
+                      <div style={{
+                        minWidth: 48,
+                        textAlign: "center",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: C.navy,
+                        backgroundColor: C.goldBg,
+                        border: `1px solid ${C.goldBorder}`,
+                        borderRadius: 3,
+                        padding: "6px 12px",
+                      }}>
+                        {shift.minimum}
+                      </div>
+                      <button
+                        onClick={() => handleUpdateMinimum(shift.shift, Math.min(20, shift.minimum + 1))}
+                        disabled={shift.minimum >= 20}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          backgroundColor: C.white,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 3,
+                          fontSize: 16,
+                          fontWeight: 600,
+                          color: C.charcoal,
+                          cursor: shift.minimum >= 20 ? "not-allowed" : "pointer",
+                          opacity: shift.minimum >= 20 ? 0.4 : 1,
+                        }}
+                      >
+                        +
+                      </button>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: C.charcoal, marginLeft: 4 }}>명</span>
                     </div>
                   </div>
                 ))}
@@ -1468,9 +1834,18 @@ export default function SettingsPage() {
         {/* 정책 추가 모달 */}
         <Modal
           open={addPolicyModal}
-          onClose={() => setAddPolicyModal(false)}
-          title={`${addPolicyType} 운영정책 추가`}
+          onClose={() => {
+            setAddPolicyModal(false);
+            setEditForm({ title: "", description: "", type: "필수" });
+            setNewPolicyUseNumeric(false);
+            setNewPolicyNumericValue(1);
+            setNewPolicyNumericLabel("");
+            setNewPolicyNumericUnit("일");
+            setNewPolicyEnforcementMode("강제 반영");
+          }}
+          title="운영정책 추가"
           description="새로운 정책을 추가합니다"
+          width={600}
         >
           <div style={{ padding: 24 }}>
             <div style={{ marginBottom: 16 }}>
@@ -1493,7 +1868,7 @@ export default function SettingsPage() {
               />
             </div>
             
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
                 정책 설명
               </label>
@@ -1501,7 +1876,7 @@ export default function SettingsPage() {
                 value={editForm.description}
                 onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                 placeholder="정책 설명을 입력하세요"
-                rows={4}
+                rows={3}
                 style={{
                   width: "100%",
                   padding: "8px 12px",
@@ -1514,9 +1889,143 @@ export default function SettingsPage() {
               />
             </div>
             
+            {/* 적용 방식 */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
+                적용 방식
+              </label>
+              <select
+                value={newPolicyEnforcementMode}
+                onChange={(e) => setNewPolicyEnforcementMode(e.target.value as "강제 반영" | "권고 경고")}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                  backgroundColor: C.white,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="강제 반영">강제 반영 (필수 정책)</option>
+                <option value="권고 경고">권고 경고 (권장 정책)</option>
+              </select>
+              <div style={{ fontSize: 9, color: C.muted, marginTop: 4, fontStyle: "italic" }}>
+                {newPolicyEnforcementMode === "강제 반영" ? "이 정책은 필수 운영정책 영역에 배치됩니다" : "이 정책은 권장 운영정책 영역에 배치됩니다"}
+              </div>
+            </div>
+            
+            {/* 숫자 관리 여부 */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={newPolicyUseNumeric}
+                  onChange={(e) => setNewPolicyUseNumeric(e.target.checked)}
+                  style={{ cursor: "pointer" }}
+                />
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.charcoal }}>
+                  숫자로 관리되는 정책입니다
+                </span>
+              </label>
+              <div style={{ fontSize: 9, color: C.muted, marginTop: 4, marginLeft: 24 }}>
+                예: "최대 연속 근무 6일", "휴무 4회" 등
+              </div>
+            </div>
+            
+            {/* 숫자 입력란 (조건부 표시) */}
+            {newPolicyUseNumeric && (
+              <div style={{
+                padding: 16,
+                backgroundColor: C.goldBg,
+                border: `1px solid ${C.goldBorder}`,
+                borderRadius: 4,
+                marginBottom: 16,
+              }}>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
+                    숫자 라벨
+                  </label>
+                  <input
+                    type="text"
+                    value={newPolicyNumericLabel}
+                    onChange={(e) => setNewPolicyNumericLabel(e.target.value)}
+                    placeholder="예: 최대 연속 근무일, 휴무 일수"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 3,
+                      fontSize: 11,
+                      fontFamily: "'Inter', sans-serif",
+                      backgroundColor: C.white,
+                    }}
+                  />
+                </div>
+                
+                <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
+                      숫자값
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={newPolicyNumericValue}
+                      onChange={(e) => setNewPolicyNumericValue(Number(e.target.value))}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 3,
+                        fontSize: 11,
+                        fontFamily: "'Inter', sans-serif",
+                        backgroundColor: C.white,
+                      }}
+                    />
+                  </div>
+                  
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
+                      단위
+                    </label>
+                    <select
+                      value={newPolicyNumericUnit}
+                      onChange={(e) => setNewPolicyNumericUnit(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 3,
+                        fontSize: 11,
+                        fontFamily: "'Inter', sans-serif",
+                        backgroundColor: C.white,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="일">일</option>
+                      <option value="명">명</option>
+                      <option value="회">회</option>
+                      <option value="시간">시간</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button
-                onClick={() => setAddPolicyModal(false)}
+                onClick={() => {
+                  setAddPolicyModal(false);
+                  setEditForm({ title: "", description: "", type: "필수" });
+                  setNewPolicyUseNumeric(false);
+                  setNewPolicyNumericValue(1);
+                  setNewPolicyNumericLabel("");
+                  setNewPolicyNumericUnit("일");
+                  setNewPolicyEnforcementMode("강제 반영");
+                }}
                 style={{
                   padding: "8px 18px",
                   backgroundColor: C.white,
@@ -1532,16 +2041,16 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={handleAddPolicy}
-                disabled={!editForm.title || !editForm.description}
+                disabled={!editForm.title || !editForm.description || (newPolicyUseNumeric && !newPolicyNumericLabel)}
                 style={{
                   padding: "8px 18px",
-                  backgroundColor: (!editForm.title || !editForm.description) ? C.border : C.navy,
-                  color: (!editForm.title || !editForm.description) ? C.muted : "#EAE0CC",
+                  backgroundColor: (!editForm.title || !editForm.description || (newPolicyUseNumeric && !newPolicyNumericLabel)) ? C.border : C.navy,
+                  color: (!editForm.title || !editForm.description || (newPolicyUseNumeric && !newPolicyNumericLabel)) ? C.muted : "#EAE0CC",
                   border: "none",
                   borderRadius: 3,
                   fontSize: 12,
                   fontWeight: 600,
-                  cursor: (!editForm.title || !editForm.description) ? "not-allowed" : "pointer",
+                  cursor: (!editForm.title || !editForm.description || (newPolicyUseNumeric && !newPolicyNumericLabel)) ? "not-allowed" : "pointer",
                 }}
               >
                 추가
@@ -1963,7 +2472,7 @@ export default function SettingsPage() {
               <button
                 onClick={() => {
                   // 비밀번호 초기화 로직
-                  alert(`${selectedAccount?.name}님의 비밀번호가 초기화되었습니다.`);
+                  showToast({ type: "success", title: "비밀번호 초기화", message: `${selectedAccount?.name}님의 비밀번호가 초기화되었습니다.` });
                   setResetPasswordActiveModal(false);
                 }}
                 style={{
@@ -2310,26 +2819,7 @@ export default function SettingsPage() {
           </div>
         </Modal>
 
-        {/* 성공 메시지 토스트 */}
-        {successMessage && (
-          <div style={{
-            position: "fixed",
-            top: 80,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 2000,
-            padding: "14px 24px",
-            backgroundColor: C.ok,
-            color: C.white,
-            borderRadius: 4,
-            fontSize: 12,
-            fontWeight: 600,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            animation: "slideDown 0.3s ease-out",
-          }}>
-            ✓ {successMessage}
-          </div>
-        )}
+        {/* 알림 — 전역 ToastContainer에서 처리 */}
       </div>
     </AppLayout>
   );

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type React from "react";
 import AppLayout from "../components/layout/AppLayout";
+import { useAppContext } from "../context/AppContext";
 
 /* ══════════════════════════════════════════════════════════
    COLOR TOKENS
@@ -32,10 +33,11 @@ const C = {
   rowAlt:      "#FAFAF8",
 };
 
-/* ═════════════��════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════
    TYPE DEFINITIONS
 ══════════════════════════════════════════════════════════ */
 type ShiftType = "오전조" | "오후조" | "야간조" | "중간조";
+type PrimaryShiftType = "오전조" | "오후조" | "야간조"; // 주 배치 그룹
 type GradeType = "엘크루" | "주니어" | "L1-A" | "L1-C" | "L1-D" | "L2-A" | "L2-C" | "L3" | "L4";
 type RoleType = "인차지" | "담당";
 
@@ -47,18 +49,29 @@ interface FrontHistory {
 interface Employee {
   id: number;
   name: string;
+  employeeId?: string; // 사번 추가
+  gender: "남" | "여"; // 성별 추가
   grade: GradeType;
   role: RoleType;
-  assignedShifts: ShiftType[];
+  primaryShift: PrimaryShiftType; // 주 배치 그룹 (오전조/오후조/야간조)
+  canWorkMiddleShift: boolean; // 중간조 가능 여부
+  assignedShifts: ShiftType[]; // 호환성 유지 (primaryShift + 중간조 기반 계산)
   inchargeShifts: ShiftType[];
   isConfirmed: boolean;
   joinDate: string;
   frontHistories: FrontHistory[];
+  totalAnnualLeave?: number; // 총 연차 일수
+  totalVacation?: number; // 총 휴가 일수
+  hotel?: string; // 소속 호텔
+  department?: string; // 부서
+  phone?: string; // 연락처
+  email?: string; // 이메일
+  permission?: string; // 권한
 }
 
 /* ══════════════════════════════════════════════════════════
    UTILITY FUNCTIONS
-══════════════════════════════════════════════════════════ */
+═════════════════════════════════════════════════════════ */
 function calculateTenure(startDate: string): string {
   const start = new Date(startDate);
   const today = new Date();
@@ -121,20 +134,35 @@ const MOCK_EMPLOYEES: Employee[] = [
   {
     id: 1,
     name: "김민준",
+    employeeId: "E001",
+    gender: "남",
     grade: "L3",
     role: "인차지",
-    assignedShifts: ["오전조", "오후조"],
+    primaryShift: "오전조",
+    canWorkMiddleShift: true,
+    assignedShifts: ["오전조", "중간조"],
     inchargeShifts: ["오전조", "오후조"],
     isConfirmed: true,
     joinDate: "2021-03-15",
     frontHistories: [{ startDate: "2021-03-15" }],
+    totalAnnualLeave: 15,
+    totalVacation: 10,
+    hotel: "롯데호텔 월드",
+    department: "프런트",
+    phone: "010-1234-5678",
+    email: "kimminjun@example.com",
+    permission: "관리자",
   },
   {
     id: 2,
     name: "이서연",
+    employeeId: "E002",
+    gender: "여",
     grade: "L2-A",
     role: "인차지",
-    assignedShifts: ["오후조", "야간조"],
+    primaryShift: "오후조",
+    canWorkMiddleShift: false,
+    assignedShifts: ["오후조"],
     inchargeShifts: ["오후조"],
     isConfirmed: true,
     joinDate: "2020-06-20",
@@ -142,39 +170,79 @@ const MOCK_EMPLOYEES: Employee[] = [
       { startDate: "2020-06-20", endDate: "2022-08-31" },
       { startDate: "2023-02-01" }
     ],
+    totalAnnualLeave: 15,
+    totalVacation: 10,
+    hotel: "롯데호텔 서울",
+    department: "프런트",
+    phone: "010-8765-4321",
+    email: "leesuyeon@example.com",
+    permission: "사원",
   },
   {
     id: 3,
     name: "박지호",
+    employeeId: "E003",
+    gender: "남",
     grade: "L2-C",
     role: "담당",
-    assignedShifts: ["오전조", "야간조"],
+    primaryShift: "오전조",
+    canWorkMiddleShift: false,
+    assignedShifts: ["오전조"],
     inchargeShifts: [],
     isConfirmed: true,
     joinDate: "2022-01-10",
     frontHistories: [{ startDate: "2022-01-10" }],
+    totalAnnualLeave: 15,
+    totalVacation: 10,
+    hotel: "롯데호텔 월드",
+    department: "프런트",
+    phone: "010-5678-1234",
+    email: "parkjihoo@example.com",
+    permission: "사원",
   },
   {
     id: 4,
     name: "최유진",
+    employeeId: "E004",
+    gender: "여",
     grade: "L1-C",
     role: "담당",
-    assignedShifts: [],
+    primaryShift: "야간조",
+    canWorkMiddleShift: true,
+    assignedShifts: ["야간조", "중간조"],
     inchargeShifts: [],
     isConfirmed: false,
     joinDate: "2023-09-01",
     frontHistories: [{ startDate: "2023-09-01" }],
+    totalAnnualLeave: 12,
+    totalVacation: 8,
+    hotel: "롯데호텔 서울",
+    department: "프런트",
+    phone: "010-4321-8765",
+    email: "choiyujin@example.com",
+    permission: "사원",
   },
   {
     id: 5,
     name: "정현우",
+    employeeId: "E005",
+    gender: "남",
     grade: "L1-D",
     role: "담당",
-    assignedShifts: [],
+    primaryShift: "오후조",
+    canWorkMiddleShift: true,
+    assignedShifts: ["오후조", "중간조"],
     inchargeShifts: [],
     isConfirmed: false,
     joinDate: "2024-02-14",
     frontHistories: [{ startDate: "2024-02-14" }],
+    totalAnnualLeave: 11,
+    totalVacation: 5,
+    hotel: "롯데호텔 월드",
+    department: "프런트",
+    phone: "010-1234-8765",
+    email: "jeonghyeonwoo@example.com",
+    permission: "사원",
   },
 ];
 
@@ -334,13 +402,24 @@ function EmployeeFormModal({
   isAddMode?: boolean;
 }) {
   const [name, setName] = useState(employee?.name || "");
+  const [employeeId, setEmployeeId] = useState(employee?.employeeId || "");
+  const [gender, setGender] = useState<"남" | "여">(employee?.gender || "남");
   const [grade, setGrade] = useState<GradeType>(employee?.grade || "L1-D");
   const [role, setRole] = useState<RoleType>(employee?.role || "담당");
+  const [primaryShift, setPrimaryShift] = useState<PrimaryShiftType>(employee?.primaryShift || "오전조");
+  const [canWorkMiddleShift, setCanWorkMiddleShift] = useState<boolean>(employee?.canWorkMiddleShift || false);
   const [assignedShifts, setAssignedShifts] = useState<ShiftType[]>(employee?.assignedShifts || []);
   const [joinDate, setJoinDate] = useState(employee?.joinDate || "");
   const [frontHistories, setFrontHistories] = useState<FrontHistory[]>(
     employee?.frontHistories || [{ startDate: "" }]
   );
+  const [totalAnnualLeave, setTotalAnnualLeave] = useState<number>(employee?.totalAnnualLeave || 15);
+  const [totalVacation, setTotalVacation] = useState<number>(employee?.totalVacation || 10);
+  const [hotel, setHotel] = useState(employee?.hotel || "");
+  const [department, setDepartment] = useState(employee?.department || "");
+  const [phone, setPhone] = useState(employee?.phone || "");
+  const [email, setEmail] = useState(employee?.email || "");
+  const [permission, setPermission] = useState(employee?.permission || "");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // 모달이 열릴 때 employee 데이터로 state 초기화
@@ -349,32 +428,45 @@ function EmployeeFormModal({
       setShowDeleteConfirm(false);
       if (isAddMode) {
         setName("");
+        setEmployeeId("");
+        setGender("남");
         setGrade("L1-D");
         setRole("담당");
+        setPrimaryShift("오전조");
+        setCanWorkMiddleShift(false);
         setAssignedShifts([]);
         setJoinDate("");
         setFrontHistories([{ startDate: "" }]);
+        setTotalAnnualLeave(15);
+        setTotalVacation(10);
+        setHotel("");
+        setDepartment("");
+        setPhone("");
+        setEmail("");
+        setPermission("");
       } else if (employee) {
         setName(employee.name);
+        setEmployeeId(employee.employeeId || "");
+        setGender(employee.gender);
         setGrade(employee.grade);
         setRole(employee.role);
+        setPrimaryShift(employee.primaryShift);
+        setCanWorkMiddleShift(employee.canWorkMiddleShift);
         setAssignedShifts(employee.assignedShifts);
         setJoinDate(employee.joinDate);
         setFrontHistories(employee.frontHistories.length > 0 ? employee.frontHistories : [{ startDate: "" }]);
+        setTotalAnnualLeave(employee.totalAnnualLeave || 15);
+        setTotalVacation(employee.totalVacation || 10);
+        setHotel(employee.hotel || "");
+        setDepartment(employee.department || "");
+        setPhone(employee.phone || "");
+        setEmail(employee.email || "");
+        setPermission(employee.permission || "");
       }
     }
   }, [open, employee, isAddMode]);
 
-  const allShifts: ShiftType[] = ["오전조", "오후조", "야간조", "중간조"];
   const allGrades: GradeType[] = ["엘크루", "주니어", "L1-A", "L1-C", "L1-D", "L2-A", "L2-C", "L3", "L4"];
-
-  const toggleAssignedShift = (shift: ShiftType) => {
-    setAssignedShifts(prev =>
-      prev.includes(shift)
-        ? prev.filter(s => s !== shift)
-        : [...prev, shift]
-    );
-  };
 
   const addFrontHistory = () => {
     setFrontHistories([...frontHistories, { startDate: "" }]);
@@ -397,17 +489,31 @@ function EmployeeFormModal({
   };
 
   const handleConfirm = () => {
+    // assignedShifts: 주 배치 그룹만 포함 (중간조는 근무표 자동생성 시 별도 배정)
+    const calculatedAssignedShifts: ShiftType[] = [primaryShift];
+    
     const employeeData: Partial<Employee> = {
       name,
+      employeeId,
+      gender,
       grade,
       role,
-      assignedShifts,
+      primaryShift,
+      canWorkMiddleShift,
+      assignedShifts: calculatedAssignedShifts,
       joinDate,
       frontHistories: frontHistories.filter(h => h.startDate),
+      totalAnnualLeave,
+      totalVacation,
+      hotel,
+      department,
+      phone,
+      email,
+      permission,
     };
 
     if (isAddMode) {
-      onSave({ ...employeeData, id: Date.now(), isConfirmed: assignedShifts.length > 0, inchargeShifts: [] });
+      onSave({ ...employeeData, id: Date.now(), isConfirmed: true, inchargeShifts: [] });
     } else {
       onSave({ ...employeeData, id: employee?.id });
     }
@@ -420,7 +526,7 @@ function EmployeeFormModal({
   const currentFrontTenure = calculateCurrentFrontTenure(frontHistories);
   const totalFrontExp = calculateTotalFrontExperience(frontHistories);
 
-  const canSave = name && grade && joinDate && assignedShifts.length > 0 && frontHistories.some(h => h.startDate);
+  const canSave = name && grade && joinDate && frontHistories.some(h => h.startDate);
 
   return (
     <Modal
@@ -465,6 +571,28 @@ function EmployeeFormModal({
                 <div style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>{employee?.name}</div>
               </div>
             )}
+
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                성별 *
+              </label>
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value as "남" | "여")}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                  backgroundColor: C.white,
+                }}
+              >
+                <option value="남">남</option>
+                <option value="여">여</option>
+              </select>
+            </div>
 
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
@@ -703,61 +831,349 @@ function EmployeeFormModal({
         {/* 배치 그룹 설정 */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>
-            배치 그룹 선택 *
+            배치 그룹 설정 *
           </div>
-          <div style={{ fontSize: 10, color: C.muted, marginBottom: 12 }}>
-            실제 근무표에 반영할 배치 그룹을 선택해주세요.
+          <div style={{ fontSize: 10, color: C.muted, marginBottom: 14 }}>
+            근무표 정렬 및 배치 기준이 되는 주 배치 그룹을 선택하고, 추가 가능 조를 설정합니다.
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {allShifts.map(shift => {
-              const isAssigned = assignedShifts.includes(shift);
-              
-              return (
+          
+          {/* 주 배치 그룹 */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 4 }}>
+              주 배치 그룹 *
+            </label>
+            <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
+              오전조 · 오후조 · 야간조 중 해당 직원의 기본 배치 조
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {(["오전조", "오후조", "야간조"] as PrimaryShiftType[]).map(shift => (
                 <label
                   key={shift}
                   style={{
+                    flex: 1,
                     display: "flex",
                     alignItems: "center",
-                    gap: 6,
-                    padding: "10px 16px",
-                    border: `1px solid ${isAssigned ? C.navy : C.border}`,
-                    borderRadius: 3,
+                    justifyContent: "center",
+                    gap: 8,
+                    padding: "12px 16px",
+                    border: `2px solid ${primaryShift === shift ? C.navy : C.border}`,
+                    borderRadius: 4,
                     cursor: "pointer",
-                    backgroundColor: isAssigned ? "rgba(13,27,42,0.06)" : C.white,
+                    backgroundColor: primaryShift === shift ? "rgba(13,27,42,0.06)" : C.white,
+                    transition: "all 0.15s",
                   }}
                 >
                   <input
-                    type="checkbox"
-                    checked={isAssigned}
-                    onChange={() => toggleAssignedShift(shift)}
+                    type="radio"
+                    name="primaryShift"
+                    value={shift}
+                    checked={primaryShift === shift}
+                    onChange={(e) => setPrimaryShift(e.target.value as PrimaryShiftType)}
                     style={{ cursor: "pointer" }}
                   />
-                  <span style={{ fontSize: 12, fontWeight: 500, color: C.charcoal }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: primaryShift === shift ? C.navy : C.charcoal }}>
                     {shift}
                   </span>
                 </label>
-              );
-            })}
-          </div>
-        </div>
-
-        {assignedShifts.length > 0 && (
-          <div style={{
-            padding: 14,
-            backgroundColor: C.okBg,
-            border: `1px solid ${C.okBorder}`,
-            borderRadius: 4,
-          }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: C.ok, marginBottom: 6 }}>
-              선택된 배치 그룹
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {assignedShifts.map(shift => (
-                <ShiftBadge key={shift} shift={shift} />
               ))}
             </div>
           </div>
-        )}
+
+          {/* 중간조 자동 배정 가능 여부 */}
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 4 }}>
+              중간조 자동 배정
+            </label>
+            <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
+              수요예측 기반 C08~C11 코드 자동 배정 허용 여부
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 16px",
+                border: `1px solid ${canWorkMiddleShift ? C.goldBorder : C.border}`,
+                borderRadius: 3,
+                cursor: "pointer",
+                backgroundColor: canWorkMiddleShift ? C.goldBg : C.white,
+                transition: "all 0.15s",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={canWorkMiddleShift}
+                onChange={(e) => setCanWorkMiddleShift(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              <span style={{ fontSize: 12, fontWeight: 500, color: canWorkMiddleShift ? "#7A5518" : C.charcoal }}>
+                중간조 자동 배정 가능 (C08 · C09 · C10 · C11)
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* 선택 결과 표시 */}
+        <div style={{
+          padding: 14,
+          backgroundColor: C.okBg,
+          border: `1px solid ${C.okBorder}`,
+          borderRadius: 4,
+          marginBottom: 24,
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: C.ok, marginBottom: 6 }}>
+            근무표 반영 정보
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <ShiftBadge shift={primaryShift} />
+            {canWorkMiddleShift && (
+              <span style={{
+                fontSize: 9,
+                padding: "3px 8px",
+                backgroundColor: "rgba(185,155,90,0.08)",
+                color: "#7A5518",
+                border: "1px solid rgba(185,155,90,0.3)",
+                borderRadius: 3,
+                fontWeight: 500,
+              }}>
+                중간조 자동 배정 가능
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 8 }}>
+            주 배치 그룹: {primaryShift}{canWorkMiddleShift && " · 수요예측 기반 중간조(C08~C11) 자동 배정 허용"}
+          </div>
+        </div>
+
+        {/* 휴가 설정 */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>
+            휴가 설정
+          </div>
+          <div style={{ 
+            padding: 16, 
+            backgroundColor: C.goldBg, 
+            border: `1px solid ${C.goldBorder}`, 
+            borderRadius: 4,
+            marginBottom: 14,
+          }}>
+            <div style={{ fontSize: 10, color: "#7A5518", lineHeight: 1.6, marginBottom: 4 }}>
+              <strong>근태 신청 / 근태 관리 화면에서 참조되는 기준값입니다.</strong>
+            </div>
+            <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.5 }}>
+              각 직원별로 연차와 휴가 총량을 설정하여 근태 관리 시스템에서 사용합니다.
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                총 연차
+              </label>
+              <div style={{ position: "relative" }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={totalAnnualLeave}
+                  onChange={(e) => setTotalAnnualLeave(Number(e.target.value))}
+                  style={{
+                    width: "100%",
+                    padding: "8px 40px 8px 12px",
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    fontFamily: "'Inter', sans-serif",
+                    color: C.navy,
+                  }}
+                />
+                <span style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  fontSize: 11,
+                  color: C.muted,
+                  fontWeight: 500,
+                }}>
+                  일
+                </span>
+              </div>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                총 휴가
+              </label>
+              <div style={{ position: "relative" }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={totalVacation}
+                  onChange={(e) => setTotalVacation(Number(e.target.value))}
+                  style={{
+                    width: "100%",
+                    padding: "8px 40px 8px 12px",
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 3,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    fontFamily: "'Inter', sans-serif",
+                    color: C.navy,
+                  }}
+                />
+                <span style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  fontSize: 11,
+                  color: C.muted,
+                  fontWeight: 500,
+                }}>
+                  일
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 추가 정보 */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>
+            추가 정보
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                사번
+              </label>
+              <input
+                type="text"
+                value={employeeId}
+                onChange={(e) => setEmployeeId(e.target.value)}
+                placeholder="E001"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                소속 호텔
+              </label>
+              <select
+                value={hotel}
+                onChange={(e) => setHotel(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                  backgroundColor: C.white,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">선택</option>
+                <option value="롯데호텔 월드">롯데호텔 월드</option>
+                <option value="롯데호텔 서울">롯데호텔 서울</option>
+                <option value="롯데시티호텔 마포">롯데시티호텔 마포</option>
+                <option value="롯데시티호텔 명동">롯데시티호텔 명동</option>
+                <option value="롯데시티호텔 김포공항">롯데시티호텔 김포공항</option>
+                <option value="롯데시티호텔 구로">롯데시티호텔 구로</option>
+                <option value="롯데리조트 부여">롯데리조트 부여</option>
+                <option value="롯데리조트 속초">롯데리조트 속초</option>
+                <option value="롯데리조트 제주 아트빌라스">롯데리조트 제주 아트빌라스</option>
+                <option value="롯데호텔 부산">롯데호텔 부산</option>
+                <option value="롯데호텔 제주">롯데호텔 제주</option>
+                <option value="롯데호텔 울산">롯데호텔 울산</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                부서
+              </label>
+              <input
+                type="text"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                placeholder="프런트"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                연락처
+              </label>
+              <input
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="010-1234-5678"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                이메일
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="kimminjun@example.com"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: C.charcoal, marginBottom: 6 }}>
+                권한
+              </label>
+              <input
+                type="text"
+                value={permission}
+                onChange={(e) => setPermission(e.target.value)}
+                placeholder="관리자"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 12,
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       <div style={{
@@ -977,12 +1393,13 @@ function ConfirmAllModal({
    MAIN PAGE
 ══════════════════════════════════════════════════════════ */
 export default function EmployeesPage() {
+  const { employeeConfirmed, setEmployeeConfirmed, setEmployeeCounts } = useAppContext();
   const [employees, setEmployees] = useState<Employee[]>(MOCK_EMPLOYEES);
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | undefined>(undefined);
   const [isAddMode, setIsAddMode] = useState(false);
-  const [allConfirmed, setAllConfirmed] = useState(false);
+  const [allConfirmed, setAllConfirmed] = useState(employeeConfirmed);
   const [allConfirmedAt, setAllConfirmedAt] = useState<string | null>(null);
   
   // 필터 상태
@@ -1020,6 +1437,7 @@ export default function EmployeesPage() {
     }
     // 직원 데이터 변경 시 전체 확정 상태 해제
     setAllConfirmed(false);
+    setEmployeeConfirmed(false);
   };
 
   const handleDeleteEmployee = (employeeId: number) => {
@@ -1027,15 +1445,21 @@ export default function EmployeesPage() {
     setFormModalOpen(false);
     // 직원 삭제 시 전체 확정 상태 해제
     setAllConfirmed(false);
+    setEmployeeConfirmed(false);
   };
 
   const handleConfirmAll = () => {
+    const timestamp = new Date().toISOString();
     setAllConfirmed(true);
-    setAllConfirmedAt(new Date().toISOString());
+    setAllConfirmedAt(timestamp);
+    setEmployeeConfirmed(true, timestamp);
+    // 대시보드 직원 현황 동기화
+    const inchargeCount = employees.filter((e) => e.role === "인차지").length;
+    setEmployeeCounts({ total: employees.length, incharge: inchargeCount, aiAdjustments: 12 });
     setConfirmModalOpen(false);
   };
 
-  // ��터링
+  // 터링
   const filteredEmployees = employees.filter(emp => {
     if (searchTerm && !emp.name.includes(searchTerm)) return false;
     if (filterGrade !== "전체" && emp.grade !== filterGrade) return false;
@@ -1251,6 +1675,7 @@ export default function EmployeesPage() {
                   }}>
                     이름
                   </th>
+                  <th style={{ position: "sticky", top: 0, zIndex: 50, padding: "10px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>성별</th>
                   <th style={{ position: "sticky", top: 0, zIndex: 50, padding: "10px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>직급</th>
                   <th style={{ position: "sticky", top: 0, zIndex: 50, padding: "10px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>역할</th>
                   <th style={{ position: "sticky", top: 0, zIndex: 50, padding: "10px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>조 배치</th>
@@ -1288,15 +1713,35 @@ export default function EmployeesPage() {
                         {emp.name}
                       </td>
                       <td style={{ padding: "11px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
+                        <Badge label={emp.gender} variant="muted" />
+                      </td>
+                      <td style={{ padding: "11px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
                         <Badge label={emp.grade} variant="muted" />
                       </td>
                       <td style={{ padding: "11px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
                         <Badge label={emp.role} variant={emp.role === "인차지" ? "gold" : "navy"} />
                       </td>
                       <td style={{ padding: "11px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
-                        {emp.assignedShifts.map(shift => (
-                          <ShiftBadge key={shift} shift={shift} />
-                        ))}
+                        <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
+                          <ShiftBadge shift={emp.primaryShift} />
+                          {emp.canWorkMiddleShift && (
+                            <span
+                              title="중간조(C08~C11) 자동 배정 가능"
+                              style={{
+                                fontSize: 9,
+                                padding: "2px 6px",
+                                backgroundColor: "rgba(185,155,90,0.08)",
+                                color: "#7A5518",
+                                border: "1px solid rgba(185,155,90,0.3)",
+                                borderRadius: 3,
+                                fontWeight: 500,
+                                letterSpacing: "0.02em",
+                              }}
+                            >
+                              C08~11
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: "11px 16px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, textAlign: "center", color: C.charcoal, fontWeight: 600, backgroundColor: rowBg }}>
                         {totalTenure}

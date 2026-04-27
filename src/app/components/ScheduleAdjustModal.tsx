@@ -27,7 +27,7 @@ const C = {
 type ShiftCode =
   | "M07" | "A13" | "N22"
   | "C08" | "C09" | "C10" | "C11"
-  | "REQ" | "OFF" | "HOL" | "VAC" | "SL";
+  | "REQ" | "OFF" | "HOL" | "VAC" | "SL" | "EDU" | "SICK";
 
 const SHIFT: Record<ShiftCode, { bg: string; text: string; border: string; name: string }> = {
   M07: { bg: "#EAF2FB", text: "#1B5990", border: "#B5D0EE", name: "오전조" },
@@ -42,10 +42,12 @@ const SHIFT: Record<ShiftCode, { bg: string; text: string; border: string; name:
   HOL: { bg: "#FDF2DC", text: "#7A5800", border: "#E6C04A", name: "공휴일" },
   VAC: { bg: "#E6F4EF", text: "#18664A", border: "#88CCAE", name: "휴가" },
   SL:  { bg: "#F0E8F5", text: "#662288", border: "#C8A0E2", name: "여성보건휴가" },
+  EDU: { bg: "#E8F3FA", text: "#1A5A8A", border: "#A8CEE8", name: "교육" },
+  SICK:{ bg: "#FFF0E6", text: "#CC5500", border: "#FFB380", name: "병가" },
 };
 
 const WORK_CODES: ShiftCode[] = ["M07", "A13", "N22", "C08", "C09", "C10", "C11"];
-const REST_CODES: ShiftCode[] = ["REQ", "OFF", "HOL", "VAC", "SL"];
+const REST_CODES: ShiftCode[] = ["REQ", "OFF", "HOL", "VAC", "SL", "EDU", "SICK"];
 
 const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -148,25 +150,30 @@ export default function ScheduleAdjustModal({ open, onClose, empName, day, curre
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
         style={{
-          maxWidth: 700,
+          maxWidth: 520,
+          maxHeight: "calc(100vh - 48px)",
           padding: 0,
           backgroundColor: C.white,
           border: `1px solid ${C.border}`,
           borderRadius: 4,
           boxShadow: "0 8px 24px rgba(13, 27, 42, 0.12)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
         }}
       >
         {/* Header */}
         <DialogHeader
           style={{
-            padding: "20px 24px",
+            padding: "14px 20px",
             borderBottom: `1px solid ${C.border}`,
             backgroundColor: "#FAFAF8",
+            flexShrink: 0,
           }}
         >
           <DialogTitle
             style={{
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: 600,
               color: C.navy,
               fontFamily: "'Cormorant Garamond', serif",
@@ -175,21 +182,21 @@ export default function ScheduleAdjustModal({ open, onClose, empName, day, curre
           >
             {t.schedAdjustTitle}
           </DialogTitle>
-          <DialogDescription style={{ fontSize: 11, color: C.muted, marginTop: 6, fontFamily: "'Inter', sans-serif" }}>
+          <DialogDescription style={{ fontSize: 11, color: C.muted, marginTop: 4, fontFamily: "'Inter', sans-serif" }}>
             {empName} · 3월 {day}일 ({dow}){isWeekend && " · 주말"}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Body */}
-        <div style={{ padding: "24px" }}>
+        {/* Body — scrollable */}
+        <div style={{ padding: "16px 20px", overflowY: "auto", flex: 1 }}>
           {/* Current Assignment */}
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
               {t.schedAdjustCurrent}
             </div>
             {currentCode && (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 14px", backgroundColor: SHIFT[currentCode].bg, border: `1px solid ${SHIFT[currentCode].border}`, borderRadius: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: SHIFT[currentCode].text, fontFamily: "'Inter', sans-serif" }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", backgroundColor: SHIFT[currentCode].bg, border: `1px solid ${SHIFT[currentCode].border}`, borderRadius: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: SHIFT[currentCode].text, fontFamily: "'Inter', sans-serif" }}>
                   {currentCode}
                 </span>
                 <span style={{ fontSize: 11, color: SHIFT[currentCode].text, opacity: 0.8 }}>
@@ -200,88 +207,71 @@ export default function ScheduleAdjustModal({ open, onClose, empName, day, curre
           </div>
 
           {/* Select New Code */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
               {t.schedAdjustSelectNew}
             </div>
 
             {/* Work Shifts */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 9, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 9, fontWeight: 600, color: C.charcoal, marginBottom: 6 }}>
                 {t.schedAdjustWorkShifts}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {WORK_CODES.map((code) => {
-                  const isSelected = code === currentCode;
-                  return (
-                    <SelectableChip
-                      key={code}
-                      code={code}
-                      isSelected={isSelected}
-                      onClick={() => onApply(code)}
-                    />
-                  );
-                })}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {WORK_CODES.map((code) => (
+                  <SelectableChip
+                    key={code}
+                    code={code}
+                    isSelected={code === currentCode}
+                    onClick={() => onApply(code)}
+                  />
+                ))}
               </div>
             </div>
 
             {/* Rest Days */}
             <div>
-              <div style={{ fontSize: 9, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
+              <div style={{ fontSize: 9, fontWeight: 600, color: C.charcoal, marginBottom: 6 }}>
                 {t.schedAdjustRestDays}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {REST_CODES.map((code) => {
-                  const isSelected = code === currentCode;
-                  return (
-                    <SelectableChip
-                      key={code}
-                      code={code}
-                      isSelected={isSelected}
-                      onClick={() => onApply(code)}
-                    />
-                  );
-                })}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {REST_CODES.map((code) => (
+                  <SelectableChip
+                    key={code}
+                    code={code}
+                    isSelected={code === currentCode}
+                    onClick={() => onApply(code)}
+                  />
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Impact Analysis */}
-          <div style={{ padding: 16, backgroundColor: C.bg, border: `1px solid ${C.border}`, borderRadius: 4 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
+          {/* Impact Analysis — compact */}
+          <div style={{ padding: "12px 14px", backgroundColor: C.bg, border: `1px solid ${C.border}`, borderRadius: 4 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
               {t.schedAdjustImpactTitle}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <span style={{ fontSize: 14, color: C.ok }}>✓</span>
-                <span style={{ fontSize: 10.5, color: C.charcoal, lineHeight: 1.5 }}>
-                  {t.schedAdjustCoverageChange}
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <span style={{ fontSize: 14, color: C.ok }}>✓</span>
-                <span style={{ fontSize: 10.5, color: C.charcoal, lineHeight: 1.5 }}>
-                  {t.schedAdjustRolling14}
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <span style={{ fontSize: 14, color: C.ok }}>✓</span>
-                <span style={{ fontSize: 10.5, color: C.charcoal, lineHeight: 1.5 }}>
-                  {t.schedAdjustNightRule}
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <span style={{ fontSize: 14, color: C.ok }}>✓</span>
-                <span style={{ fontSize: 10.5, color: C.charcoal, lineHeight: 1.5 }}>
-                  {t.schedAdjustWeekendFairness}
-                </span>
-              </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {[
+                t.schedAdjustCoverageChange,
+                t.schedAdjustRolling14,
+                t.schedAdjustNightRule,
+                t.schedAdjustWeekendFairness,
+              ].map((text, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: C.ok, flexShrink: 0 }}>✓</span>
+                  <span style={{ fontSize: 10.5, color: C.charcoal, lineHeight: 1.4, fontFamily: "'Inter', sans-serif" }}>
+                    {text}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div style={{ padding: "16px 24px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <div style={{ padding: "12px 20px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: 10, flexShrink: 0, backgroundColor: "#FAFAF8" }}>
           <button
             onClick={onClose}
             style={{
@@ -289,7 +279,7 @@ export default function ScheduleAdjustModal({ open, onClose, empName, day, curre
               backgroundColor: C.white,
               color: C.charcoal,
               borderRadius: 3,
-              padding: "8px 18px",
+              padding: "7px 16px",
               fontSize: 12,
               fontWeight: 500,
               cursor: "pointer",
