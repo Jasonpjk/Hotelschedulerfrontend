@@ -7,8 +7,8 @@ import DemandPage from "./pages/DemandPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import RequestPage from "./pages/RequestPage";
 import AttendancePage from "./pages/AttendancePage";
-import SettingsPage from "./pages/SettingsPage";
 import RedeploymentPage from "./pages/RedeploymentPage";
+import SettingsPage from "./pages/SettingsPage";
 import ProfilePage from "./pages/ProfilePage";
 import AnnualNightShiftPlanPage from "./pages/AnnualNightShiftPlanPage";
 
