@@ -3,6 +3,8 @@ import { useNavigate } from "react-router";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import lotteLogo from "figma:asset/b5f675b5ca48c50750fc1b535604b775fca63344.png";
 import hotelLobbyImage from "figma:asset/c0ca28a090159584b398e8d033c1e842d930a4fb.png";
+import { loginApi, getMeApi } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 /* ══════════════════════════════════════════════════════════
    CONSTANTS
@@ -819,28 +821,47 @@ function LangSwitcher({ lang, onChange }: { lang: Lang; onChange: (l: Lang) => v
 ══════════════════════════════════════════════════════════ */
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { setAuth } = useAuth();
   const [lang, setLang] = useState<Lang>("ko");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
-  
+
   // 모달 상태
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [signupOpen, setSignupOpen] = useState(false);
 
   const t = T[lang];
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    setLoginError("");
+    try {
+      const tokenData = await loginApi(email, password);
+      localStorage.setItem("hotel_token", tokenData.access_token);
+      const me = await getMeApi();
+      setAuth(tokenData.access_token, {
+        id: me.id,
+        email: me.email,
+        full_name: me.full_name,
+        role: me.role,
+        hotel_id: me.hotel_id,
+      });
       localStorage.setItem("lumiere_lang", lang);
       navigate("/dashboard");
-    }, 1200);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      localStorage.removeItem("hotel_token");
+      setLoginError(lang === "ko" ? "이메일 또는 비밀번호가 올바르지 않습니다." : "Invalid email or password.");
+      console.error("Login failed:", msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -970,6 +991,13 @@ export default function LoginPage() {
                     {t.forgotPassword}
                   </button>
                 </div>
+
+                {/* Login error */}
+                {loginError && (
+                  <div style={{ padding: "10px 14px", backgroundColor: "rgba(220,50,50,0.12)", border: "1px solid rgba(220,50,50,0.3)", borderRadius: 2, color: "#f87171", fontSize: 12.5, letterSpacing: "0.02em" }}>
+                    {loginError}
+                  </div>
+                )}
 
                 {/* Submit */}
                 <button

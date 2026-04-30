@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import AppLayout from "../components/layout/AppLayout";
 import { useHotel } from "../context/HotelContext";
+import { useAuth } from "../context/AuthContext";
+import { getHotelApi, getScheduleVersionsApi, generateScheduleApi, getTaskApi } from "../utils/api";
 
 /* ══════════════════════════════════════════════════════════
    COLOR TOKENS
@@ -88,7 +90,8 @@ const ALL_LOGS = [
 ══════════════════════════════════════════════════════════ */
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const hotel = useHotel();
+  const { hotel } = useHotel();
+  const { user } = useAuth();
 
   // 모달 상태
   const [newVersionModal, setNewVersionModal] = useState(false);
@@ -96,12 +99,47 @@ export default function DashboardPage() {
   const [downloadModal, setDownloadModal] = useState(false);
   const [historyModal, setHistoryModal] = useState(false);
 
-  // 새 버전 생성 핸들러
-  const handleNewVersionConfirm = () => {
+  // 실제 데이터 상태
+  const [hotelData, setHotelData] = useState<any>(null);
+  const [latestVersion, setLatestVersion] = useState<any>(null);
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  useEffect(() => {
+    if (!user?.hotel_id) return;
+    getHotelApi(user.hotel_id).then(setHotelData).catch(() => {});
+    getScheduleVersionsApi(user.hotel_id, currentYear, currentMonth)
+      .then((versions) => { if (versions.length) setLatestVersion(versions[versions.length - 1]); })
+      .catch(() => {});
+  }, [user?.hotel_id]);
+
+  // 새 버전 생성 핸들러 (실제 API)
+  const handleNewVersionConfirm = async () => {
+    if (!user?.hotel_id) return;
     setNewVersionStep("generating");
-    setTimeout(() => {
-      setNewVersionStep("done");
-    }, 1800);
+    try {
+      const { task_id } = await generateScheduleApi({ hotel_id: user.hotel_id, year: currentYear, month: currentMonth });
+      // 태스크 완료까지 폴링
+      const poll = setInterval(async () => {
+        const task = await getTaskApi(task_id);
+        if (task.state === "SUCCESS") {
+          clearInterval(poll);
+          // 새 버전 목록 갱신
+          const versions = await getScheduleVersionsApi(user.hotel_id!, currentYear, currentMonth);
+          if (versions.length) setLatestVersion(versions[versions.length - 1]);
+          setNewVersionStep("done");
+        } else if (task.state === "FAILURE") {
+          clearInterval(poll);
+          setNewVersionStep("confirm");
+          alert("근무표 생성에 실패했습니다.");
+        }
+      }, 2000);
+    } catch {
+      setNewVersionStep("confirm");
+      alert("근무표 생성 요청에 실패했습니다.");
+    }
   };
 
   const handleNewVersionClose = () => {
@@ -140,15 +178,17 @@ export default function DashboardPage() {
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>대상 월</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>2026년 4월</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>{currentYear}년 {currentMonth}월</div>
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>근무표 버전</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>v3.3</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.navy }}>{latestVersion ? `v${latestVersion.version_number}` : "—"}</div>
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>근무표 상태</div>
-              <Badge label="작업 중" variant="progress" />
+              {latestVersion
+                ? <Badge label={latestVersion.status === "final" ? "확정" : latestVersion.status === "locked" ? "검토 중" : "작업 중"} variant={latestVersion.status === "final" ? "complete" : latestVersion.status === "locked" ? "review" : "progress"} />
+                : <Badge label="미생성" variant="notstarted" />}
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>수요 예측</div>
@@ -160,7 +200,11 @@ export default function DashboardPage() {
             </div>
             <div>
               <div style={{ fontSize: 9, color: C.muted, marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>마지막 반영</div>
-              <div style={{ fontSize: 11, color: C.charcoal }}>2026.03.26 14:32</div>
+              <div style={{ fontSize: 11, color: C.charcoal }}>
+                {latestVersion?.updated_at
+                  ? new Date(latestVersion.updated_at).toLocaleString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                  : "—"}
+              </div>
             </div>
           </div>
         </div>

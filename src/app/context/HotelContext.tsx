@@ -1,7 +1,24 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
-export const HotelContext = createContext<string>("롯데시티호텔 마포");
+interface HotelContextType {
+  hotel: string;
+  setHotel: (hotel: string) => void;
+}
 
-export function useHotel(): string {
+const HotelContext = createContext<HotelContextType>({
+  hotel: "롯데시티호텔 마포",
+  setHotel: () => {},
+});
+
+export function HotelProvider({ children }: { children: ReactNode }) {
+  const [hotel, setHotel] = useState("롯데시티호텔 마포");
+  return (
+    <HotelContext.Provider value={{ hotel, setHotel }}>
+      {children}
+    </HotelContext.Provider>
+  );
+}
+
+export function useHotel() {
   return useContext(HotelContext);
 }

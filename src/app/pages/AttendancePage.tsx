@@ -1,1160 +1,1177 @@
-import { useState } from "react";
-import type React from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import AppLayout from "../components/layout/AppLayout";
+import { useAttendanceDeadline } from "../context/AttendanceDeadlineContext";
+import { useToast } from "../context/ToastContext";
+import { useAppContext } from "../context/AppContext";
+import { X, Info, Shield, Plus, CheckCircle, XCircle, AlertTriangle, Loader } from "lucide-react";
+import AttendanceRequestModal from "../components/AttendanceRequestModal";
 
 /* ══════════════════════════════════════════════════════════
    COLOR TOKENS
 ══════════════════════════════════════════════════════════ */
 const C = {
-  navy:        "#0D1B2A",
-  navyDeep:    "#091523",
-  gold:        "#B99B5A",
-  goldBg:      "rgba(185,155,90,0.08)",
-  goldBorder:  "rgba(185,155,90,0.25)",
-  bg:          "#F2EFE9",
-  white:       "#FFFFFF",
-  border:      "#E4DED4",
-  borderLight: "#EDE8E0",
-  muted:       "#7B8390",
-  charcoal:    "#2E3642",
-  text:        "#1C2430",
-  ok:          "#2E7D52",
-  okBg:        "rgba(46,125,82,0.07)",
-  okBorder:    "rgba(46,125,82,0.2)",
-  warning:     "#B87C1A",
-  warnBg:      "rgba(184,124,26,0.08)",
-  warnBorder:  "rgba(184,124,26,0.22)",
-  pending:     "#5E7FA3",
-  pendingBg:   "rgba(94,127,163,0.08)",
+  navy:          "#0D1B2A",
+  navyDeep:      "#091523",
+  gold:          "#B99B5A",
+  goldBg:        "rgba(185,155,90,0.08)",
+  goldBorder:    "rgba(185,155,90,0.25)",
+  bg:            "#F2EFE9",
+  white:         "#FFFFFF",
+  border:        "#E4DED4",
+  borderLight:   "#EDE8E0",
+  muted:         "#7B8390",
+  charcoal:      "#2E3642",
+  text:          "#1C2430",
+  ok:            "#2E7D52",
+  okBg:          "rgba(46,125,82,0.07)",
+  okBorder:      "rgba(46,125,82,0.2)",
+  warning:       "#B87C1A",
+  warnBg:        "rgba(184,124,26,0.08)",
+  warnBorder:    "rgba(184,124,26,0.22)",
+  pending:       "#5E7FA3",
+  pendingBg:     "rgba(94,127,163,0.08)",
   pendingBorder: "rgba(94,127,163,0.22)",
-  risk:        "#B83232",
-  riskBg:      "rgba(184,50,50,0.06)",
-  riskBorder:  "rgba(184,50,50,0.22)",
-  rowAlt:      "#FAFAF8",
+  risk:          "#B83232",
+  riskBg:        "rgba(184,50,50,0.06)",
+  riskBorder:    "rgba(184,50,50,0.22)",
+  rowAlt:        "#FAFAF8",
 };
 
 /* ══════════════════════════════════════════════════════════
    TYPE DEFINITIONS
 ══════════════════════════════════════════════════════════ */
-type RequestType = "휴가" | "SL" | "연차";
-type FinalType = "휴가" | "SL" | "연차" | "휴무" | "공휴" | "미반영";
-type RequestStatus = "신청 접수" | "자동 반영 완료" | "검토 필요" | "반영 불가";
+type RequestIntention =
+  | "쉬는 날 희망" | "주말 근무 희망" | "공휴 근무 희망"
+  | "신청 없음" | "휴가 신청" | "교육 신청" | "병가 신청";
 
-interface AttendanceRequest {
+type FinalType = "휴가" | "SL" | "연차" | "EDU" | "SICK" | "미반영";
+
+type RequestStatus =
+  | "신청 접수"
+  | "자동 반영 가능"
+  | "자동 반영 완료"
+  | "관리자 조정 필요"    // 반영되었으나 관리자가 유형 변경 판단 필요 (예: SL → 연차)
+  | "관리자 조정 완료"    // 관리자가 유형 변경 처리 완료 (예: SL → 연차 확정)
+  | "미반영"              // 근무표에 아직 반영되지 않은 건
+  | "승인 대기"           // 관리자 승인 전 접수 상태
+  | "승인 완료"           // 관리자 승인 및 근무표 반영 완료
+  | "반려"                // 관리자 반려
+  | "신청 취소"           // 직원 취소
+  | "검토 필요"           // legacy
+  | "반영 불가";          // legacy
+
+interface AttendanceDetail {
   id: number;
-  employeeName: string;
-  employeeId: number;
   date: string;
-  type: RequestType; // 신청 유형
-  finalType?: FinalType; // 최종 반영
+  intention: RequestIntention;
+  finalType?: FinalType;
   reason: string;
+  adjustmentReason?: string;
+  isSystemAssigned: boolean;
+  isManualAdjusted: boolean;
   status: RequestStatus;
   createdAt: string;
-  autoNote?: string; // 자동 반영 사유
-  conflictNote?: string; // 운영 충돌 사유
-}
-
-interface EmployeeBalance {
-  employeeId: number;
-  employeeName: string;
-  vacationTotal: number;    // 휴가 총
-  vacation: number;         // 휴가 잔여
-  annualLeaveTotal: number; // 연차 총
-  annualLeave: number;      // 연차 잔여
+  educationCategory?: "사내" | "사외" | "법정" | "기타";
+  educationTitle?: string;
+  educationIsFullDay?: boolean;
+  sickLeaveIsHalfDay?: boolean;
+  attachmentCount?: number;
+  approvedVersion?: string;    // 승인 완료 후 생성된 근무표 버전
+  rejectReason?: string;       // 반려 사유
 }
 
 interface EmployeeSummary {
   employeeId: number;
   employeeName: string;
+  gender: "남" | "여";
   totalRequests: number;
   dates: string[];
-  types: { [key in RequestType]?: number };
+  intentions: RequestIntention[];
   autoCompleted: number;
   reviewNeeded: number;
-  cannotReflect: number;
-  notReflected: number; // 미반영 건수 (검토 필요 + 반영 불가)
+  notReflected: number;
   vacationTotal: number;
   vacation: number;
   annualLeaveTotal: number;
   annualLeave: number;
-  requests: AttendanceRequest[];
+  slUsedThisMonth: boolean;
+  hoTotalDays: number;
+  hoUsedDays: number;
+  details: AttendanceDetail[];
+}
+
+// 시뮬레이션 결과 타입
+type SimulationType = "edu" | "sick";
+type SimulationOutcome = "loading" | "success" | "partial" | "fail";
+
+interface SimulationResult {
+  type: SimulationType;
+  outcome: SimulationOutcome;
+  employeeId: number;
+  detailId: number;
+  employeeName: string;
+  date: string;
+  originalCode: string;
+  newCode: string;
+  replacements: { name: string; from: string; to: string }[];
+  warnings: string[];
+  versionName: string;
+  failReasons?: string[];
 }
 
 /* ══════════════════════════════════════════════════════════
    MOCK DATA
 ══════════════════════════════════════════════════════════ */
-const MOCK_REQUESTS: AttendanceRequest[] = [
+const MOCK_DATA: EmployeeSummary[] = [
   {
-    id: 1,
-    employeeName: "김민준",
     employeeId: 1,
-    date: "2026-04-15",
-    type: "연차",
-    finalType: "휴무",
-    reason: "개인 사유",
-    status: "자동 반영 완료",
-    createdAt: "2026-03-20",
-    autoNote: "14일 4휴무 규칙 우선 반영으로 휴무 처리되었습니다.",
+    employeeName: "김민준",
+    gender: "남",
+    totalRequests: 4,
+    dates: ["2026-04-05", "2026-04-12", "2026-04-18", "2026-04-25"],
+    intentions: ["쉬는 날 희망", "쉬는 날 희망", "신청 없음", "휴가 신청"],
+    autoCompleted: 3,
+    reviewNeeded: 1,
+    notReflected: 1,
+    vacationTotal: 15, vacation: 5,
+    annualLeaveTotal: 15, annualLeave: 12,
+    slUsedThisMonth: false,
+    hoTotalDays: 15, hoUsedDays: 4,
+    details: [
+      {
+        id: 1, date: "2026-04-05", intention: "쉬는 날 희망", finalType: "연차",
+        reason: "개인 사유", adjustmentReason: "SL은 여직원만 사용 가능하여 연차로 자동 배정했습니다.",
+        isSystemAssigned: true, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-03-20",
+      },
+      {
+        id: 2, date: "2026-04-12", intention: "쉬는 날 희망", finalType: "연차",
+        reason: "개인 사유", adjustmentReason: "연차로 자동 반영되었습니다.",
+        isSystemAssigned: true, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-03-22",
+      },
+      {
+        id: 3, date: "2026-04-18", intention: "신청 없음", finalType: "연차",
+        reason: "", adjustmentReason: "적정 인원 대비 근무 인원 과다로 연차를 배정했습니다. (남직원은 SL 사용 불가)",
+        isSystemAssigned: true, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-04-10",
+      },
+      {
+        id: 4, date: "2026-04-25", intention: "휴가 신청", finalType: "미반영",
+        reason: "가족 행사", adjustmentReason: "최소 운영 인원 부족으로 근무표에 반영할 수 없습니다. 다른 날짜 검토가 필요합니다.",
+        isSystemAssigned: false, isManualAdjusted: false, status: "미반영", createdAt: "2026-03-25",
+      },
+    ],
   },
   {
-    id: 2,
-    employeeName: "이서연",
     employeeId: 2,
-    date: "2026-04-22",
-    type: "휴가",
-    finalType: "휴가",
-    reason: "가족 행사",
-    status: "자동 반영 완료",
-    createdAt: "2026-03-18",
-    autoNote: "자동 반영 완료되었습니다.",
+    employeeName: "이서연",
+    gender: "여",
+    totalRequests: 4,
+    dates: ["2026-04-08", "2026-04-15", "2026-04-22", "2026-04-28"],
+    intentions: ["쉬는 날 희망", "쉬는 날 희망", "휴가 신청", "교육 신청"],
+    autoCompleted: 2,
+    reviewNeeded: 2,
+    notReflected: 0,
+    vacationTotal: 15, vacation: 2,
+    annualLeaveTotal: 15, annualLeave: 8,
+    slUsedThisMonth: true,
+    hoTotalDays: 15, hoUsedDays: 3,
+    details: [
+      {
+        id: 5, date: "2026-04-08", intention: "쉬는 날 희망", finalType: "SL",
+        reason: "병원 진료",
+        adjustmentReason: "여직원 월 1회 SL 사용 가능 정책에 따라 SL(여성 보건휴가)로 자동 반영되었습니다. 관리자가 필요 시 연차로 변경할 수 있습니다.",
+        isSystemAssigned: true, isManualAdjusted: false, status: "관리자 조정 필요", createdAt: "2026-03-28",
+      },
+      {
+        id: 6, date: "2026-04-15", intention: "쉬는 날 희망", finalType: "연차",
+        reason: "개인 사유", adjustmentReason: "해당 월 SL이 이미 소진되어 연차로 자동 반영되었습니다.",
+        isSystemAssigned: true, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-04-01",
+      },
+      {
+        id: 7, date: "2026-04-22", intention: "휴가 신청", finalType: "휴가",
+        reason: "가족 행사", adjustmentReason: "직원이 직접 휴가를 신청하여 반영되었습니다.",
+        isSystemAssigned: false, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-03-18",
+      },
+      {
+        id: 11, date: "2026-04-28", intention: "교육 신청", finalType: "EDU",
+        reason: "고객 응대 서비스 교육",
+        educationCategory: "사내", educationTitle: "고급 CS 교육", educationIsFullDay: true,
+        adjustmentReason: "교육(EDU) 코드로 접수되었습니다. 관리자 최종 승인 후 근무표에 반영됩니다.",
+        isSystemAssigned: false, isManualAdjusted: false, status: "승인 대기", createdAt: "2026-04-10",
+        attachmentCount: 0,
+      },
+    ],
   },
   {
-    id: 3,
-    employeeName: "박지호",
     employeeId: 3,
-    date: "2026-04-10",
-    type: "SL",
-    finalType: "SL",
-    reason: "병원 진료",
-    status: "자동 반영 완료",
-    createdAt: "2026-04-09",
-    autoNote: "자동 반영 완료되었습니다.",
+    employeeName: "박지호",
+    gender: "남",
+    totalRequests: 4,
+    dates: ["2026-04-10", "2026-04-20", "2026-04-24", "2026-04-29"],
+    intentions: ["쉬는 날 희망", "신청 없음", "병가 신청", "병가 신청"],
+    autoCompleted: 3,
+    reviewNeeded: 1,
+    notReflected: 0,
+    vacationTotal: 15, vacation: 4,
+    annualLeaveTotal: 15, annualLeave: 10,
+    slUsedThisMonth: false,
+    hoTotalDays: 15, hoUsedDays: 5,
+    details: [
+      {
+        id: 8, date: "2026-04-10", intention: "쉬는 날 희망", finalType: "연차",
+        reason: "개인 사유", adjustmentReason: "SL은 여직원만 사용 가능하여 연차로 자동 배정했습니다.",
+        isSystemAssigned: true, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-04-05",
+      },
+      {
+        id: 9, date: "2026-04-20", intention: "신청 없음", finalType: "연차",
+        reason: "", adjustmentReason: "적정 인원 대비 근무 인원 과다로 연차를 배정했습니다. (남직원은 SL 사용 불가)",
+        isSystemAssigned: true, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-04-12",
+      },
+      {
+        id: 12, date: "2026-04-24", intention: "병가 신청", finalType: "SICK",
+        reason: "감기 증상", sickLeaveIsHalfDay: false,
+        adjustmentReason: "병가(SICK)로 자동 반영되었습니다.",
+        isSystemAssigned: false, isManualAdjusted: false, status: "자동 반영 완료", createdAt: "2026-04-22",
+        attachmentCount: 1,
+      },
+      {
+        id: 14, date: "2026-04-29", intention: "병가 신청", finalType: "SICK",
+        reason: "복통 및 고열", sickLeaveIsHalfDay: false,
+        adjustmentReason: "병가 신청이 접수되었습니다. 관리자 승인 후 SICK 코드로 반영됩니다.",
+        isSystemAssigned: false, isManualAdjusted: false, status: "승인 대기", createdAt: "2026-04-28",
+        attachmentCount: 0,
+      },
+    ],
   },
   {
-    id: 4,
-    employeeName: "최유진",
     employeeId: 4,
-    date: "2026-04-05",
-    type: "연차",
-    finalType: "미반영",
-    reason: "여행",
-    status: "검토 필요",
-    createdAt: "2026-03-25",
-    conflictNote: "최소 운영 인원 부족으로 검토가 필요합니다.",
-  },
-  {
-    id: 5,
-    employeeName: "정현우",
-    employeeId: 5,
-    date: "2026-04-18",
-    type: "휴가",
-    finalType: "미반영",
-    reason: "개인 사유",
-    status: "반영 불가",
-    createdAt: "2026-03-15",
-    conflictNote: "수요 예측 최소 인원 충족 불가로 반영할 수 없습니다.",
-  },
-  {
-    id: 6,
-    employeeName: "김민준",
-    employeeId: 1,
-    date: "2026-04-20",
-    type: "연차",
-    finalType: "휴무",
-    reason: "",
-    status: "자동 반영 완료",
-    createdAt: "2026-04-01",
-    autoNote: "14일 4휴무 규칙 우선 반영으로 휴무 처리되었습니다.",
-  },
-  {
-    id: 7,
-    employeeName: "김민준",
-    employeeId: 1,
-    date: "2026-04-23",
-    type: "SL",
-    finalType: "SL",
-    reason: "병원 진료",
-    status: "자동 반영 완료",
-    createdAt: "2026-04-10",
-    autoNote: "자동 반영 완료되었습니다.",
-  },
-  {
-    id: 8,
     employeeName: "최유진",
-    employeeId: 4,
-    date: "2026-04-12",
-    type: "휴가",
-    finalType: "미반영",
-    reason: "가족 행사",
-    status: "반영 불가",
-    createdAt: "2026-03-28",
-    conflictNote: "수요 예측 최소 인원 충족 불가로 반영할 수 없습니다.",
+    gender: "여",
+    totalRequests: 2,
+    dates: ["2026-04-05", "2026-04-12"],
+    intentions: ["쉬는 날 희망", "쉬는 날 희망"],
+    autoCompleted: 0,
+    reviewNeeded: 2,
+    notReflected: 1,
+    vacationTotal: 15, vacation: 6,
+    annualLeaveTotal: 15, annualLeave: 15,
+    slUsedThisMonth: true,
+    hoTotalDays: 15, hoUsedDays: 2,
+    details: [
+      {
+        id: 10, date: "2026-04-05", intention: "쉬는 날 희망", finalType: "SL",
+        reason: "개인 사유",
+        adjustmentReason: "여직원 월 1회 SL 사용 가능 정책에 따라 SL(여성 보건휴가)로 자동 반영되었습니다. 관리자가 필요 시 연차로 변경할 수 있습니다.",
+        isSystemAssigned: true, isManualAdjusted: false, status: "관리자 조정 필요", createdAt: "2026-03-25",
+      },
+      {
+        id: 13, date: "2026-04-12", intention: "쉬는 날 희망", finalType: "미반영",
+        reason: "여행",
+        adjustmentReason: "최소 운영 인원 부족으로 근무표에 반영할 수 없습니다. 수동 반영 또는 다른 날짜 검토가 필요합니다.",
+        isSystemAssigned: false, isManualAdjusted: false, status: "미반영", createdAt: "2026-03-28",
+      },
+    ],
   },
-];
-
-const INITIAL_BALANCES: EmployeeBalance[] = [
-  { employeeId: 1, employeeName: "김민준", vacationTotal: 15, vacation: 5, annualLeaveTotal: 15, annualLeave: 12 },
-  { employeeId: 2, employeeName: "이서연", vacationTotal: 15, vacation: 2, annualLeaveTotal: 15, annualLeave: 8 },
-  { employeeId: 3, employeeName: "박지호", vacationTotal: 15, vacation: 4, annualLeaveTotal: 15, annualLeave: 10 },
-  { employeeId: 4, employeeName: "최유진", vacationTotal: 15, vacation: 6, annualLeaveTotal: 15, annualLeave: 15 },
-  { employeeId: 5, employeeName: "정현우", vacationTotal: 15, vacation: 3, annualLeaveTotal: 15, annualLeave: 9 },
 ];
 
 /* ══════════════════════════════════════════════════════════
-   UTILITY FUNCTIONS
+   동적 통계 헬퍼
 ══════════════════════════════════════════════════════════ */
-function groupByEmployee(requests: AttendanceRequest[], balances: EmployeeBalance[]): EmployeeSummary[] {
-  const grouped = new Map<number, EmployeeSummary>();
+const REVIEW_STATUSES: RequestStatus[] = ["관리자 조정 필요", "미반영", "승인 대기", "검토 필요", "반영 불가"];
+const AUTO_STATUSES: RequestStatus[] = ["자동 반영 완료", "관리자 조정 완료", "승인 완료"];
 
-  requests.forEach(req => {
-    if (!grouped.has(req.employeeId)) {
-      const balance = balances.find(b => b.employeeId === req.employeeId);
-      grouped.set(req.employeeId, {
-        employeeId: req.employeeId,
-        employeeName: req.employeeName,
-        totalRequests: 0,
-        dates: [],
-        types: {},
-        autoCompleted: 0,
-        reviewNeeded: 0,
-        cannotReflect: 0,
-        notReflected: 0,
-        vacationTotal: balance?.vacationTotal || 15,
-        vacation: balance?.vacation || 0,
-        annualLeaveTotal: balance?.annualLeaveTotal || 15,
-        annualLeave: balance?.annualLeave || 0,
-        requests: [],
-      });
-    }
-
-    const summary = grouped.get(req.employeeId)!;
-    summary.totalRequests++;
-    summary.dates.push(req.date);
-    summary.types[req.type] = (summary.types[req.type] || 0) + 1;
-    summary.requests.push(req);
-
-    if (req.status === "자동 반영 완료") summary.autoCompleted++;
-    if (req.status === "검토 필요") {
-      summary.reviewNeeded++;
-      summary.notReflected++;
-    }
-    if (req.status === "반영 불가") {
-      summary.cannotReflect++;
-      summary.notReflected++;
-    }
-  });
-
-  return Array.from(grouped.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+function computeEmpStats(emp: EmployeeSummary) {
+  const autoCompleted = emp.details.filter(d => AUTO_STATUSES.includes(d.status)).length;
+  const notReflected  = emp.details.filter(d => d.status === "미반영").length;
+  const reviewNeeded  = emp.details.filter(d => REVIEW_STATUSES.includes(d.status)).length;
+  return { autoCompleted, notReflected, reviewNeeded };
 }
 
-function formatDatesSummary(dates: string[]): string {
-  if (dates.length === 0) return "-";
-  if (dates.length === 1) return dates[0];
-  const sorted = [...dates].sort();
-  if (dates.length <= 3) {
-    return sorted.join(", ");
-  }
-  return `${sorted[0]} 외 ${dates.length - 1}건`;
-}
+/* ══════════════════════════════════════════════════════════
+   MAIN COMPONENT
+══════════════════════════════════════════════════════════ */
+export default function AttendancePage() {
+  const [data, setData] = useState<EmployeeSummary[]>(MOCK_DATA);
+  const [showDeadlineModal, setShowDeadlineModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeSummary | null>(null);
 
-function getStatusBadge(status: RequestStatus) {
-  const map: Record<RequestStatus, { bg: string; color: string; border: string; label: string }> = {
-    "신청 접수": { bg: C.pendingBg, color: C.pending, border: C.pendingBorder, label: "신청 접수" },
-    "자동 반영 완료": { bg: C.okBg, color: C.ok, border: C.okBorder, label: "자동 반영 완료" },
-    "검토 필요": { bg: C.warnBg, color: C.warning, border: C.warnBorder, label: "검토 필요" },
-    "반영 불가": { bg: C.riskBg, color: C.risk, border: C.riskBorder, label: "반영 불가" },
+  // 시뮬레이션 관련 상태
+  const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
+  const [showSimModal, setShowSimModal] = useState(false);
+  const [simLoading, setSimLoading] = useState(false);
+
+  const { isDeadlineClosed, closeDeadline, deadlineClosedAt } = useAttendanceDeadline();
+  const { showToast } = useToast();
+  const { setAttendanceStats } = useAppContext();
+
+  // 동적 통계 계산
+  const computedData = useMemo(() => data.map(emp => {
+    const s = computeEmpStats(emp);
+    return { ...emp, ...s };
+  }), [data]);
+
+  const totalEmployees     = computedData.length;
+  const totalRequests      = computedData.reduce((sum, e) => sum + e.totalRequests, 0);
+  const totalAutoCompleted = computedData.reduce((sum, e) => sum + e.autoCompleted, 0);
+  const totalReviewNeeded  = computedData.reduce((sum, e) => sum + e.reviewNeeded, 0);
+  const totalNotReflected  = computedData.reduce((sum, e) => sum + e.notReflected, 0);
+
+  // 대시보드 근태 통계 동기화
+  useEffect(() => {
+    setAttendanceStats({
+      reviewNeeded:    totalReviewNeeded,
+      notReflected:    totalNotReflected,
+      pendingApproval: computedData.reduce((s, e) =>
+        s + e.details.filter(d => d.status === "승인 대기").length, 0),
+      autoCompleted:   totalAutoCompleted,
+    });
+  }, [data, totalReviewNeeded, totalNotReflected, totalAutoCompleted, setAttendanceStats, computedData]);
+
+  /* ── 상세 검토 열기 ─────────────────────────────────── */
+  const openDetailModal = (employeeId: number) => {
+    const emp = computedData.find(e => e.employeeId === employeeId);
+    if (emp) { setSelectedEmployee(emp); setShowDetailModal(true); }
   };
-  const s = map[status];
-  return (
-    <span style={{
-      display: "inline-block",
-      padding: "3px 10px",
-      fontSize: 10,
-      fontWeight: 600,
-      borderRadius: 3,
-      backgroundColor: s.bg,
-      color: s.color,
-      border: `1px solid ${s.border}`,
-      whiteSpace: "nowrap",
-    }}>
-      {s.label}
-    </span>
-  );
-}
 
-function getTypeBadge(type: RequestType | FinalType, label?: string) {
-  return (
-    <span style={{
-      display: "inline-block",
-      padding: "3px 10px",
-      fontSize: 10,
-      fontWeight: 600,
-      borderRadius: 3,
-      backgroundColor: C.goldBg,
-      color: "#7A5518",
-      border: `1px solid ${C.goldBorder}`,
-      whiteSpace: "nowrap",
-    }}>
-      {label || type}
-    </span>
-  );
-}
+  /* ── 근태신청 마감 ─────────────────────────────────── */
+  const handleCloseDeadline = () => { closeDeadline(); setShowDeadlineModal(false); };
 
-function getFinalTypeBadge(finalType: FinalType, requestType: RequestType) {
-  const isDifferent = finalType !== requestType && finalType !== "미반영";
-  
-  // 미반영인 경우
-  if (finalType === "미반영") {
-    return (
-      <span style={{
-        display: "inline-block",
-        padding: "3px 10px",
-        fontSize: 10,
-        fontWeight: 600,
-        borderRadius: 3,
-        backgroundColor: "rgba(123,131,144,0.1)",
-        color: "#5A6574",
-        border: `1px solid rgba(123,131,144,0.25)`,
-        whiteSpace: "nowrap",
-      }}>
-        {finalType}
-      </span>
-    );
-  }
-  
-  // 변경된 경우 회색 계열로 표시
-  if (isDifferent) {
-    return (
-      <span style={{
-        display: "inline-block",
-        padding: "3px 10px",
-        fontSize: 10,
-        fontWeight: 600,
-        borderRadius: 3,
-        backgroundColor: "rgba(123,131,144,0.1)",
-        color: "#5A6574",
-        border: `1px solid rgba(123,131,144,0.25)`,
-        whiteSpace: "nowrap",
-      }}>
-        {finalType}
-      </span>
-    );
-  }
-  
-  // 변경되지 않은 경우 골드 계열
-  return getTypeBadge(finalType);
+  /* ── 교육/병가 신청 접수 ─────────────────────────────── */
+  const handleSubmitRequest = (requestData: any) => {
+    showToast({ type: "success", title: "신청 접수", message: `${requestData.type} 신청이 접수되었습니다.` });
+  };
+
+  /* ── SL → 연차 수동 조정 ────────────────────────────── */
+  const handleConvertToAnnualLeave = (employeeId: number, detailId: number) => {
+    setData(prev => prev.map(emp => {
+      if (emp.employeeId !== employeeId) return emp;
+      const updatedDetails = emp.details.map(d => {
+        if (d.id === detailId && d.finalType === "SL") {
+          return {
+            ...d,
+            finalType: "연차" as FinalType,
+            adjustmentReason: "관리자가 SL을 연차로 수정했습니다.",
+            isManualAdjusted: true,
+            status: "관리자 조정 완료" as RequestStatus,
+          };
+        }
+        return d;
+      });
+      const hasAnySL = updatedDetails.some(d => d.finalType === "SL" && !d.isManualAdjusted);
+      return {
+        ...emp,
+        details: updatedDetails,
+        slUsedThisMonth: hasAnySL,
+        // 연차 1일 차감
+        annualLeave: Math.max(0, emp.annualLeave - 1),
+      };
+    }));
+    // 모달 내 selectedEmployee도 즉시 갱신
+    setSelectedEmployee(prev => {
+      if (!prev || prev.employeeId !== employeeId) return prev;
+      const updatedDetails = prev.details.map(d => {
+        if (d.id === detailId && d.finalType === "SL") {
+          return {
+            ...d, finalType: "연차" as FinalType,
+            adjustmentReason: "관리자가 SL을 연차로 수정했습니다.",
+            isManualAdjusted: true,
+            status: "관리자 조정 완료" as RequestStatus,
+          };
+        }
+        return d;
+      });
+      const hasAnySL = updatedDetails.some(d => d.finalType === "SL" && !d.isManualAdjusted);
+      return {
+        ...prev,
+        details: updatedDetails,
+        slUsedThisMonth: hasAnySL,
+        annualLeave: Math.max(0, prev.annualLeave - 1),
+      };
+    });
+    showToast({ type: "success", title: "연차 전환 완료", message: "SL이 연차로 변경되었습니다. 연차 잔여가 재계산되었습니다." });
+  };
+
+  /* ── 교육 시뮬레이션 실행 ────────────────────────────── */
+  const handleApproveEDU = (employeeId: number, detailId: number) => {
+    const emp = data.find(e => e.employeeId === employeeId);
+    const detail = emp?.details.find(d => d.id === detailId);
+    if (!emp || !detail) return;
+    setSimLoading(true);
+    setShowSimModal(true);
+    // 2초 시뮬레이션 딜레이 (mock)
+    setTimeout(() => {
+      // 시뮬레이션 결과: 박지호를 대체로 사용
+      const result: SimulationResult = {
+        type: "edu",
+        outcome: "success",
+        employeeId,
+        detailId,
+        employeeName: emp.employeeName,
+        date: detail.date.substring(5),
+        originalCode: "M07",
+        newCode: "EDU",
+        replacements: [
+          { name: "박지호", from: "OFF", to: "M07" },
+        ],
+        warnings: [],
+        versionName: `v4.1 교육 반영 자동재배치`,
+      };
+      setSimulationResult(result);
+      setSimLoading(false);
+    }, 1800);
+  };
+
+  /* ── 병가 시뮬레이션 실행 ────────────────────────────── */
+  const handleApproveSICK = (employeeId: number, detailId: number) => {
+    const emp = data.find(e => e.employeeId === employeeId);
+    const detail = emp?.details.find(d => d.id === detailId);
+    if (!emp || !detail) return;
+    setSimLoading(true);
+    setShowSimModal(true);
+    setTimeout(() => {
+      // 시뮬레이션 결과: 일부 경고 포함
+      const result: SimulationResult = {
+        type: "sick",
+        outcome: "partial",
+        employeeId,
+        detailId,
+        employeeName: emp.employeeName,
+        date: detail.date.substring(5),
+        originalCode: "A13",
+        newCode: "SICK",
+        replacements: [
+          { name: "이서연", from: "OFF", to: "A13" },
+        ],
+        warnings: ["오전조 최소 인원 1명 부족 — 추가 수동 배치 필요"],
+        versionName: `v4.2 병가 반영 긴급재배치`,
+      };
+      setSimulationResult(result);
+      setSimLoading(false);
+    }, 1800);
+  };
+
+  /* ── 시뮬레이션 결과 저장 확정 ────────────────────────── */
+  const handleConfirmSave = () => {
+    if (!simulationResult) return;
+    const { employeeId, detailId, type, outcome, versionName } = simulationResult;
+    const newCode = type === "edu" ? "EDU" : "SICK";
+    const newStatus: RequestStatus = "승인 완료";
+
+    setData(prev => prev.map(emp => {
+      if (emp.employeeId !== employeeId) return emp;
+      const updatedDetails = emp.details.map(d => {
+        if (d.id === detailId) {
+          return {
+            ...d,
+            finalType: newCode as FinalType,
+            adjustmentReason: type === "edu"
+              ? `교육 신청 승인 및 자동 재배치 완료. 생성 버전: ${versionName}`
+              : `병가 신청 승인 및 긴급 재배치 완료. 생성 버전: ${versionName}${outcome === "partial" ? " (일부 운영 경고 포함)" : ""}`,
+            isManualAdjusted: true,
+            status: newStatus,
+            approvedVersion: versionName,
+          };
+        }
+        return d;
+      });
+      return { ...emp, details: updatedDetails };
+    }));
+    setSelectedEmployee(prev => {
+      if (!prev || prev.employeeId !== employeeId) return prev;
+      return {
+        ...prev,
+        details: prev.details.map(d => {
+          if (d.id !== detailId) return d;
+          return {
+            ...d,
+            finalType: newCode as FinalType,
+            adjustmentReason: type === "edu"
+              ? `교육 신청 승인 및 자동 재배치 완료. 생성 버전: ${versionName}`
+              : `병가 신청 승인 및 긴급 재배치 완료. 생성 버전: ${versionName}${outcome === "partial" ? " (일부 운영 경고 포함)" : ""}`,
+            isManualAdjusted: true,
+            status: newStatus,
+            approvedVersion: versionName,
+          };
+        }),
+      };
+    });
+    setShowSimModal(false);
+    setSimulationResult(null);
+    showToast({
+      type: "success",
+      title: type === "edu" ? "교육 승인 완료" : "병가 승인 완료",
+      message: `${versionName} 버전이 생성되었습니다.`,
+    });
+  };
+
+  /* ── 반려 처리 ───────────────────────────────────────── */
+  const handleReject = (employeeId: number, detailId: number, reason: string) => {
+    setData(prev => prev.map(emp => {
+      if (emp.employeeId !== employeeId) return emp;
+      return {
+        ...emp,
+        details: emp.details.map(d => {
+          if (d.id !== detailId) return d;
+          return {
+            ...d,
+            finalType: "미반영" as FinalType,
+            adjustmentReason: reason,
+            status: "반려" as RequestStatus,
+            rejectReason: reason,
+          };
+        }),
+      };
+    }));
+    setSelectedEmployee(prev => {
+      if (!prev || prev.employeeId !== employeeId) return prev;
+      return {
+        ...prev,
+        details: prev.details.map(d => {
+          if (d.id !== detailId) return d;
+          return {
+            ...d,
+            finalType: "미반영" as FinalType,
+            adjustmentReason: reason,
+            status: "반려" as RequestStatus,
+            rejectReason: reason,
+          };
+        }),
+      };
+    });
+    setShowSimModal(false);
+    setSimulationResult(null);
+    showToast({ type: "warning", title: "신청 반려", message: "신청이 반려 처리되었습니다." });
+  };
+
+  /* ══════════════════════════════════════════════════════
+     RENDER
+  ══════════════════════════════════════════════════════ */
+  return (
+    <AppLayout>
+      <div style={{ backgroundColor: C.bg, padding: "40px 60px" }}>
+
+        {/* Header */}
+        <div style={{ marginBottom: "36px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "34px", fontWeight: 600, color: C.navy, letterSpacing: "-0.01em" }}>
+              근태 관리
+            </h1>
+            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              {!isDeadlineClosed && (
+                <button
+                  onClick={() => setShowRequestModal(true)}
+                  style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 20px", backgroundColor: C.gold, color: C.white, border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 500, cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = "#A5874D"}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = C.gold}
+                >
+                  <Plus size={16} /> 교육/병가 신청
+                </button>
+              )}
+              {isDeadlineClosed && (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 16px", backgroundColor: C.riskBg, border: `1px solid ${C.riskBorder}`, borderRadius: "6px", fontSize: "13px", color: C.risk }}>
+                  <Info size={14} />
+                  <span>근태신청 마감됨</span>
+                  {deadlineClosedAt && (
+                    <span style={{ color: C.muted, fontSize: "12px" }}>
+                      ({new Date(deadlineClosedAt).toLocaleDateString()} {new Date(deadlineClosedAt).toLocaleTimeString()})
+                    </span>
+                  )}
+                </div>
+              )}
+              {!isDeadlineClosed && (
+                <button
+                  onClick={() => setShowDeadlineModal(true)}
+                  style={{ padding: "10px 24px", backgroundColor: C.risk, color: C.white, border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 500, cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = "#A02828"}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = C.risk}
+                >
+                  근태신청 마감
+                </button>
+              )}
+            </div>
+          </div>
+          <p style={{ fontSize: "14px", color: C.muted, lineHeight: 1.6 }}>
+            직원들이 제출한 쉬는 날 희망과 휴가 계획을 기준으로 시스템이 자동 반영한 결과를 검토하고, 필요한 경우 예외를 조정합니다.
+          </p>
+        </div>
+
+        {/* ─── 상단 요약 카드 ─── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "16px", marginBottom: "32px" }}>
+          <StatCard label="전체 직원" value={totalEmployees} color={C.charcoal} />
+          <StatCard label="전체 신청" value={totalRequests} color={C.pending} />
+          <StatCard
+            label="자동 반영 완료" value={totalAutoCompleted} color={C.ok}
+            tooltip="시스템이 정책에 따라 근무표에 자동 반영 완료한 건수"
+          />
+          <StatCard
+            label="검토 필요" value={totalReviewNeeded} color={C.warning}
+            tooltip="관리자가 확인해야 하는 건. 관리자 조정 필요·미반영·승인 대기 건이 포함됩니다."
+          />
+          <StatCard
+            label="미반영 건수" value={totalNotReflected} color={C.risk}
+            tooltip="신청은 접수되었으나 아직 근무표에 반영되지 않은 건. (최소 인원 부족·충돌 등)"
+          />
+        </div>
+
+        {/* ─── 직원별 목록 테이블 ─── */}
+        {/* 컬럼: 직원명 | 성별 | 신청 건수 | 자동 반영 | 미반영 | 검토 필요 | 휴가 잔여 | 연차 잔여 | HO 사용 | 관리 */}
+        <div style={{ backgroundColor: C.white, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "auto" }}>
+          {/* Table Header */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "120px 50px 80px 80px 80px 80px 110px 110px 110px 130px",
+            backgroundColor: C.navyDeep,
+            padding: "16px 24px",
+            fontSize: "12px",
+            fontWeight: 600,
+            color: C.white,
+            letterSpacing: "0.02em",
+            textTransform: "uppercase",
+            minWidth: "960px",
+          }}>
+            <div>직원명</div>
+            <div>성별</div>
+            <div style={{ textAlign: "center" }}>신청 건수</div>
+            <div style={{ textAlign: "center" }}>자동 반영</div>
+            <div style={{ textAlign: "center" }}>미반영</div>
+            <div style={{ textAlign: "center" }}>검토 필요</div>
+            <div>휴가 잔여</div>
+            <div>연차 잔여</div>
+            <div>HO 사용</div>
+            <div style={{ textAlign: "center" }}>관리</div>
+          </div>
+
+          {/* Table Body */}
+          {computedData.map((emp, idx) => (
+            <div
+              key={emp.employeeId}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "120px 50px 80px 80px 80px 80px 110px 110px 110px 130px",
+                padding: "20px 24px",
+                fontSize: "14px",
+                color: C.text,
+                backgroundColor: idx % 2 === 0 ? C.white : C.rowAlt,
+                borderBottom: `1px solid ${C.borderLight}`,
+                alignItems: "center",
+                minWidth: "960px",
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>{emp.employeeName}</div>
+              <div style={{ fontSize: "12px", color: emp.gender === "여" ? C.gold : C.charcoal, fontWeight: 600 }}>{emp.gender}</div>
+              <div style={{ textAlign: "center" }}>{emp.totalRequests}건</div>
+              <div style={{ textAlign: "center", fontWeight: 600, color: C.ok }}>{emp.autoCompleted}</div>
+              <div style={{ textAlign: "center", fontWeight: 600, color: emp.notReflected > 0 ? C.risk : C.muted }}>{emp.notReflected}</div>
+              <div style={{ textAlign: "center", fontWeight: 600, color: emp.reviewNeeded > 0 ? C.warning : C.muted }}>{emp.reviewNeeded}</div>
+              <div style={{ fontSize: "12.5px" }}>
+                <span style={{ fontWeight: 600 }}>{emp.vacation}</span>
+                <span style={{ color: C.muted }}> / {emp.vacationTotal}일</span>
+                <div style={{ fontSize: "11px", color: C.muted }}>({Math.round((emp.vacation / emp.vacationTotal) * 100)}%)</div>
+              </div>
+              <div style={{ fontSize: "12.5px" }}>
+                <span style={{ fontWeight: 600 }}>{emp.annualLeave}</span>
+                <span style={{ color: C.muted }}> / {emp.annualLeaveTotal}일</span>
+                <div style={{ fontSize: "11px", color: C.muted }}>({Math.round((emp.annualLeave / emp.annualLeaveTotal) * 100)}%)</div>
+              </div>
+              <div style={{ fontSize: "12.5px" }}>
+                <span style={{ fontWeight: 600 }}>{emp.hoUsedDays}</span>
+                <span style={{ color: C.muted }}> / {emp.hoTotalDays}일</span>
+                <div style={{ fontSize: "11px", color: C.muted }}>({Math.round((emp.hoUsedDays / emp.hoTotalDays) * 100)}%)</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <button
+                  onClick={() => openDetailModal(emp.employeeId)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 14px", backgroundColor: "transparent", border: `1px solid ${C.border}`, borderRadius: "5px", fontSize: "13px", fontWeight: 500, color: C.charcoal, cursor: "pointer", transition: "all 0.2s" }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = C.goldBg; e.currentTarget.style.borderColor = C.goldBorder; e.currentTarget.style.color = C.gold; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.charcoal; }}
+                >
+                  상세 검토
+                </button>
+                {emp.details.some(d => d.finalType === "SL" && !d.isManualAdjusted) && (
+                  <div style={{ fontSize: "10px", color: C.warning, marginTop: "4px", fontWeight: 500 }}>
+                    ● SL {emp.details.filter(d => d.finalType === "SL" && !d.isManualAdjusted).length}건
+                  </div>
+                )}
+                {emp.details.some(d => d.status === "승인 대기") && (
+                  <div style={{ fontSize: "10px", color: C.pending, marginTop: "2px", fontWeight: 500 }}>
+                    ● 승인대기 {emp.details.filter(d => d.status === "승인 대기").length}건
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════
+          근태신청 마감 확인 모달
+      ═══════════════════════════════════════════════════ */}
+      {showDeadlineModal && (
+        <ModalOverlay onClose={() => setShowDeadlineModal(false)}>
+          <div style={{ backgroundColor: C.white, borderRadius: "8px", width: "480px", maxWidth: "90%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+              <h3 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "24px", fontWeight: 600, color: C.navy }}>근태신청 마감 확인</h3>
+              <ModalCloseBtn onClick={() => setShowDeadlineModal(false)} />
+            </div>
+            <div style={{ padding: "20px", backgroundColor: C.warnBg, border: `1px solid ${C.warnBorder}`, borderRadius: "6px", marginBottom: "24px" }}>
+              <p style={{ fontSize: "14px", color: C.charcoal, lineHeight: 1.7, marginBottom: "12px" }}>이 기간의 근태 신청을 마감하시겠습니까?</p>
+              <p style={{ fontSize: "13px", color: C.muted, lineHeight: 1.6 }}>마감 후 직원은 신청 내역을 수정하거나 삭제할 수 없습니다.</p>
+            </div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+              <OutlineBtn onClick={() => setShowDeadlineModal(false)}>취소</OutlineBtn>
+              <button
+                onClick={handleCloseDeadline}
+                style={{ padding: "10px 24px", backgroundColor: C.risk, border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 500, color: C.white, cursor: "pointer" }}
+              >마감</button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          상세 검토 모달
+      ═══════════════════════════════════════════════════ */}
+      {showDetailModal && selectedEmployee && (
+        <ModalOverlay onClose={() => setShowDetailModal(false)} padding="40px">
+          <div style={{ backgroundColor: C.white, borderRadius: "8px", width: "1060px", maxWidth: "100%", maxHeight: "90vh", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
+            {/* 모달 헤더 */}
+            <div style={{ padding: "32px 32px 24px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h3 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "28px", fontWeight: 600, color: C.navy, marginBottom: "10px" }}>
+                  {selectedEmployee.employeeName}의 상세 내역
+                </h3>
+                {/* 동적 집계 요약 */}
+                {(() => {
+                  const s = computeEmpStats(selectedEmployee);
+                  return (
+                    <div style={{ display: "flex", gap: "20px", fontSize: "13px" }}>
+                      <span style={{ color: C.muted }}>전체 신청: <strong style={{ color: C.text }}>{selectedEmployee.totalRequests}건</strong></span>
+                      <span style={{ color: C.muted }}>자동 반영: <strong style={{ color: C.ok }}>{s.autoCompleted}건</strong></span>
+                      <span style={{ color: C.muted }}>검토 필요: <strong style={{ color: C.warning }}>{s.reviewNeeded}건</strong></span>
+                      <span style={{ color: C.muted }}>미반영: <strong style={{ color: C.risk }}>{s.notReflected}건</strong></span>
+                    </div>
+                  );
+                })()}
+              </div>
+              <ModalCloseBtn onClick={() => setShowDetailModal(false)} size={24} />
+            </div>
+
+            {/* 모달 컨텐츠 */}
+            <div style={{ flex: 1, overflow: "auto", padding: "32px" }}>
+              {/* 상세 테이블 */}
+              <div style={{ backgroundColor: C.white, borderRadius: "6px", border: `1px solid ${C.border}`, overflow: "hidden", marginBottom: "24px" }}>
+                {/* 테이블 헤더 */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "100px 130px 100px 210px 100px 220px",
+                  padding: "14px 20px",
+                  backgroundColor: C.navyDeep,
+                  fontSize: "12px", fontWeight: 600, color: C.white,
+                  letterSpacing: "0.02em", textTransform: "uppercase",
+                }}>
+                  <div>날짜</div>
+                  <div>신청 의사</div>
+                  <div>최종 반영</div>
+                  <div>반영 조정 사유</div>
+                  <div>상태</div>
+                  <div style={{ textAlign: "center" }}>조정 액션</div>
+                </div>
+
+                {/* 테이블 행 */}
+                {selectedEmployee.details.map((detail, idx) => (
+                  <div
+                    key={detail.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "100px 130px 100px 210px 100px 220px",
+                      padding: "18px 20px",
+                      fontSize: "13px",
+                      backgroundColor: idx % 2 === 0 ? C.white : C.rowAlt,
+                      borderTop: idx > 0 ? `1px solid ${C.borderLight}` : "none",
+                      alignItems: "start",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: C.charcoal, paddingTop: "2px" }}>{detail.date.substring(5)}</div>
+                    <div style={{ paddingTop: "2px" }}><IntentionBadge intention={detail.intention} /></div>
+                    <div style={{ paddingTop: "2px" }}><FinalTypeBadge finalType={detail.finalType} /></div>
+                    <div>
+                      <div style={{ fontSize: "12px", color: C.muted, lineHeight: 1.5 }}>
+                        {detail.adjustmentReason || detail.reason || "-"}
+                      </div>
+                      {detail.approvedVersion && (
+                        <div style={{ fontSize: "10px", color: C.ok, marginTop: 4, fontWeight: 600 }}>
+                          생성 버전: {detail.approvedVersion}
+                        </div>
+                      )}
+                      {detail.intention === "교육 신청" && (
+                        <div style={{ marginTop: 6, padding: "5px 8px", backgroundColor: "#E8F3FA", borderRadius: 3, fontSize: 10, color: "#1A5A8A" }}>
+                          <div><strong>교육명:</strong> {detail.educationTitle}</div>
+                          <div><strong>구분:</strong> {detail.educationCategory} | {detail.educationIsFullDay ? "종일" : "반일"}</div>
+                        </div>
+                      )}
+                      {detail.intention === "병가 신청" && (
+                        <div style={{ marginTop: 6, padding: "5px 8px", backgroundColor: "#FFF0E6", borderRadius: 3, fontSize: 10, color: "#CC5500" }}>
+                          <div>{detail.sickLeaveIsHalfDay ? "반일" : "종일"} 병가</div>
+                          {detail.attachmentCount !== undefined && detail.attachmentCount > 0 && (
+                            <div><strong>첨부:</strong> {detail.attachmentCount}개 파일</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ paddingTop: "2px" }}><StatusBadge status={detail.status} /></div>
+
+                    {/* 조정 액션 열 */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "center" }}>
+                      {/* SL → 연차 변경 */}
+                      {detail.finalType === "SL" && !detail.isManualAdjusted && (
+                        <button
+                          onClick={() => handleConvertToAnnualLeave(selectedEmployee.employeeId, detail.id)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", backgroundColor: C.goldBg, border: `1px solid ${C.goldBorder}`, borderRadius: "4px", fontSize: "12px", fontWeight: 500, color: C.gold, cursor: "pointer" }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(185,155,90,0.15)"}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = C.goldBg}
+                          title="관리자 전용 기능"
+                        >
+                          <Shield size={12} /> 연차로 변경
+                        </button>
+                      )}
+
+                      {/* 교육 신청 승인 대기 */}
+                      {detail.status === "승인 대기" && detail.intention === "교육 신청" && (
+                        <>
+                          <button
+                            onClick={() => handleApproveEDU(selectedEmployee.employeeId, detail.id)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", backgroundColor: C.okBg, border: `1px solid ${C.okBorder}`, borderRadius: "4px", fontSize: "12px", fontWeight: 600, color: C.ok, cursor: "pointer", whiteSpace: "nowrap" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(46,125,82,0.14)"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = C.okBg}
+                          >
+                            <CheckCircle size={12} /> 승인 및 자동 재배치
+                          </button>
+                          <button
+                            onClick={() => handleReject(
+                              selectedEmployee.employeeId, detail.id,
+                              "관리자 판단에 의해 교육 신청이 반려되었습니다."
+                            )}
+                            style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", backgroundColor: C.riskBg, border: `1px solid ${C.riskBorder}`, borderRadius: "4px", fontSize: "12px", fontWeight: 500, color: C.risk, cursor: "pointer" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(184,50,50,0.12)"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = C.riskBg}
+                          >
+                            <XCircle size={12} /> 반려
+                          </button>
+                        </>
+                      )}
+
+                      {/* 병가 신청 승인 대기 */}
+                      {detail.status === "승인 대기" && detail.intention === "병가 신청" && (
+                        <>
+                          <button
+                            onClick={() => handleApproveSICK(selectedEmployee.employeeId, detail.id)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", backgroundColor: C.okBg, border: `1px solid ${C.okBorder}`, borderRadius: "4px", fontSize: "12px", fontWeight: 600, color: C.ok, cursor: "pointer", whiteSpace: "nowrap" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(46,125,82,0.14)"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = C.okBg}
+                          >
+                            <CheckCircle size={12} /> 승인 및 긴급 재배치
+                          </button>
+                          <button
+                            onClick={() => handleReject(
+                              selectedEmployee.employeeId, detail.id,
+                              "증빙 미제출 또는 병가 요건 불충족으로 반려되었습니다."
+                            )}
+                            style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", backgroundColor: C.riskBg, border: `1px solid ${C.riskBorder}`, borderRadius: "4px", fontSize: "12px", fontWeight: 500, color: C.risk, cursor: "pointer" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "rgba(184,50,50,0.12)"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = C.riskBg}
+                          >
+                            <XCircle size={12} /> 반려
+                          </button>
+                        </>
+                      )}
+
+                      {/* 수동 조정 완료 표시 */}
+                      {detail.isManualAdjusted && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <Shield size={12} color={C.muted} />
+                          <span style={{ fontSize: "12px", color: C.muted, fontStyle: "italic" }}>조정 완료</span>
+                        </div>
+                      )}
+
+                      {/* 반려 사유 */}
+                      {detail.status === "반려" && detail.rejectReason && (
+                        <div style={{ fontSize: "11px", color: C.risk, lineHeight: 1.4, textAlign: "center", maxWidth: "200px" }}>
+                          {detail.rejectReason}
+                        </div>
+                      )}
+
+                      {/* 액션 없는 경우 */}
+                      {detail.finalType !== "SL"
+                        && detail.status !== "승인 대기"
+                        && !detail.isManualAdjusted
+                        && detail.status !== "반려"
+                        && <span style={{ fontSize: "13px", color: C.muted }}>-</span>
+                      }
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 하단 잔여 정보 */}
+              <div style={{ padding: "20px 24px", backgroundColor: C.goldBg, border: `1px solid ${C.goldBorder}`, borderRadius: "6px", fontSize: "13px", color: C.charcoal }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "24px" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: "4px" }}>이번 달 SL 사용</div>
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: selectedEmployee.slUsedThisMonth ? C.ok : C.muted }}>
+                      {selectedEmployee.slUsedThisMonth ? "사용함" : "사용 안 함"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: "4px" }}>휴가 잔여</div>
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: C.navy }}>{selectedEmployee.vacation} / {selectedEmployee.vacationTotal}일</div>
+                    <div style={{ fontSize: "12px", color: C.muted }}>({Math.round((selectedEmployee.vacation / selectedEmployee.vacationTotal) * 100)}%)</div>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: "4px" }}>연차 잔여</div>
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: C.navy }}>{selectedEmployee.annualLeave} / {selectedEmployee.annualLeaveTotal}일</div>
+                    <div style={{ fontSize: "12px", color: C.muted }}>({Math.round((selectedEmployee.annualLeave / selectedEmployee.annualLeaveTotal) * 100)}%)</div>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: "4px" }}>HO 사용</div>
+                    <div style={{ fontSize: "16px", fontWeight: 600, color: C.navy }}>{selectedEmployee.hoUsedDays} / {selectedEmployee.hoTotalDays}일</div>
+                    <div style={{ fontSize: "12px", color: C.muted }}>({Math.round((selectedEmployee.hoUsedDays / selectedEmployee.hoTotalDays) * 100)}%)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          시뮬레이션 결과 모달
+      ═══════════════════════════════════════════════════ */}
+      {showSimModal && (
+        <ModalOverlay onClose={() => { if (!simLoading) { setShowSimModal(false); setSimulationResult(null); } }}>
+          <div style={{ backgroundColor: C.white, borderRadius: "10px", width: "580px", maxWidth: "95%", padding: "36px", boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}>
+            {simLoading ? (
+              /* 로딩 */
+              <div style={{ textAlign: "center", padding: "24px 0" }}>
+                <Loader size={36} color={C.gold} style={{ animation: "spin 1s linear infinite" }} />
+                <p style={{ marginTop: "16px", fontSize: "15px", color: C.charcoal, fontWeight: 600 }}>
+                  {simulationResult?.type === "sick" ? "긴급 재배치 시뮬레이션 실행 중..." : "자동 재배치 시뮬레이션 실행 중..."}
+                </p>
+                <p style={{ fontSize: "13px", color: C.muted, marginTop: "6px" }}>운영 정책 및 인원 충족 여부를 검토합니다.</p>
+              </div>
+            ) : simulationResult && (
+              <>
+                {/* 결과 헤더 */}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
+                  {simulationResult.outcome === "success" && <CheckCircle size={28} color={C.ok} />}
+                  {simulationResult.outcome === "partial" && <AlertTriangle size={28} color={C.warning} />}
+                  {simulationResult.outcome === "fail" && <XCircle size={28} color={C.risk} />}
+                  <div>
+                    <h3 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "22px", fontWeight: 600, color: C.navy }}>
+                      {simulationResult.type === "edu"
+                        ? (simulationResult.outcome === "fail" ? "교육 반영 불가" : "교육 반영 가능")
+                        : (simulationResult.outcome === "fail" ? "병가 반영 불가" : "병가 반영 가능")}
+                    </h3>
+                    <p style={{ fontSize: "13px", color: C.muted }}>
+                      {simulationResult.employeeName} · {simulationResult.date}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 변경 내용 */}
+                <div style={{ backgroundColor: C.bg, borderRadius: "6px", padding: "16px 20px", marginBottom: "16px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 600, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: "10px" }}>변경 셀 목록</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div style={{ fontSize: "13px", display: "flex", gap: "12px", alignItems: "center" }}>
+                      <span style={{ fontWeight: 600, color: C.charcoal }}>{simulationResult.employeeName}</span>
+                      <span style={{ color: C.muted }}>{simulationResult.date}</span>
+                      <span style={{ color: C.risk, fontWeight: 600 }}>{simulationResult.originalCode}</span>
+                      <span style={{ color: C.muted }}>→</span>
+                      <span style={{ color: C.ok, fontWeight: 600 }}>{simulationResult.newCode}</span>
+                    </div>
+                    {simulationResult.replacements.map((r, i) => (
+                      <div key={i} style={{ fontSize: "13px", display: "flex", gap: "12px", alignItems: "center" }}>
+                        <span style={{ fontWeight: 600, color: C.charcoal }}>대체: {r.name}</span>
+                        <span style={{ color: C.risk, fontWeight: 600 }}>{r.from}</span>
+                        <span style={{ color: C.muted }}>→</span>
+                        <span style={{ color: C.ok, fontWeight: 600 }}>{r.to}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 운영 경고 */}
+                {simulationResult.warnings.length > 0 && (
+                  <div style={{ backgroundColor: C.warnBg, border: `1px solid ${C.warnBorder}`, borderRadius: "6px", padding: "14px 18px", marginBottom: "16px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: C.warning, marginBottom: "8px" }}>⚠ 운영 경고</div>
+                    {simulationResult.warnings.map((w, i) => (
+                      <div key={i} style={{ fontSize: "13px", color: C.charcoal }}>{w}</div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 새 버전명 */}
+                {(simulationResult.outcome === "success" || simulationResult.outcome === "partial") && (
+                  <div style={{ backgroundColor: C.goldBg, border: `1px solid ${C.goldBorder}`, borderRadius: "6px", padding: "12px 18px", marginBottom: "20px", fontSize: "13px" }}>
+                    <span style={{ fontWeight: 600, color: C.charcoal }}>생성 버전명: </span>
+                    <span style={{ color: C.gold, fontWeight: 700 }}>{simulationResult.versionName}</span>
+                  </div>
+                )}
+
+                {/* 실패 사유 */}
+                {simulationResult.outcome === "fail" && simulationResult.failReasons && (
+                  <div style={{ backgroundColor: C.riskBg, border: `1px solid ${C.riskBorder}`, borderRadius: "6px", padding: "14px 18px", marginBottom: "20px" }}>
+                    {simulationResult.failReasons.map((r, i) => (
+                      <div key={i} style={{ fontSize: "13px", color: C.risk }}>{r}</div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 액션 버튼 */}
+                {(simulationResult.outcome === "success" || simulationResult.outcome === "partial") && (
+                  <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                    <OutlineBtn onClick={() => { setShowSimModal(false); setSimulationResult(null); }}>취소</OutlineBtn>
+                    <button
+                      onClick={handleConfirmSave}
+                      style={{ padding: "10px 22px", backgroundColor: C.ok, border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, color: C.white, cursor: "pointer" }}
+                    >
+                      {simulationResult.outcome === "partial"
+                        ? "경고 포함 새 버전 저장"
+                        : "새 버전으로 저장하고 승인 완료"}
+                    </button>
+                  </div>
+                )}
+                {simulationResult.outcome === "fail" && (
+                  <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                    <OutlineBtn onClick={() => { setShowSimModal(false); setSimulationResult(null); }}>취소</OutlineBtn>
+                    <OutlineBtn onClick={() => {
+                      if (!simulationResult) return;
+                      handleReject(simulationResult.employeeId, simulationResult.detailId,
+                        "자동 재배치 시뮬레이션 결과 반영 불가 — 최소 인원 및 인차지 조건 충족 불가");
+                    }}>반려 처리</OutlineBtn>
+                    <button
+                      onClick={() => { setShowSimModal(false); setSimulationResult(null); }}
+                      style={{ padding: "10px 22px", backgroundColor: C.warning, border: "none", borderRadius: "6px", fontSize: "14px", fontWeight: 600, color: C.white, cursor: "pointer" }}
+                    >관리자 수동 조정</button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* 교육/병가 신청 모달 */}
+      <AttendanceRequestModal
+        isOpen={showRequestModal}
+        onClose={() => setShowRequestModal(false)}
+        onSubmit={handleSubmitRequest}
+      />
+
+      {/* 스피너 애니메이션 CSS */}
+      <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
+    </AppLayout>
+  );
 }
 
 /* ══════════════════════════════════════════════════════════
-   MODAL COMPONENT
+   공통 소형 컴포넌트
 ══════════════════════════════════════════════════════════ */
-function Modal({
-  open,
-  onClose,
-  title,
-  description,
-  children,
-  width = 600,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-  width?: number;
-}) {
-  if (!open) return null;
-
+function ModalOverlay({ children, onClose, padding = "0" }: { children: React.ReactNode; onClose: () => void; padding?: string }) {
   return (
-    <div style={{
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: "rgba(0,0,0,0.5)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 1000,
-      overflow: "auto",
-      padding: "40px 20px",
-    }}>
-      <div style={{
-        backgroundColor: C.white,
-        border: `1px solid ${C.border}`,
-        borderRadius: 4,
-        maxWidth: width,
-        width: "100%",
-        maxHeight: "90vh",
-        overflow: "auto",
-        margin: "auto",
-      }}>
-        <div style={{
-          padding: 20,
-          borderBottom: `1px solid ${C.border}`,
-          backgroundColor: "#FAFAF8",
-        }}>
-          <h3 style={{
-            fontSize: 16,
-            fontWeight: 600,
-            color: C.navy,
-            fontFamily: "'Cormorant Garamond', serif",
-            marginBottom: description ? 6 : 0,
-          }}>
-            {title}
-          </h3>
-          {description && (
-            <p style={{
-              fontSize: 11,
-              color: C.muted,
-              fontFamily: "'Inter', sans-serif",
-            }}>
-              {description}
-            </p>
-          )}
-        </div>
-        {children}
-      </div>
+    <div
+      style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      {children}
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════════════════
-   근태 신청 수정 모달
-══════════════════════════════════════════════════════════ */
-function RequestEditModal({
-  open,
-  onClose,
-  request,
-  onSave,
-}: {
-  open: boolean;
-  onClose: () => void;
-  request: AttendanceRequest | null;
-  onSave: (updatedRequest: AttendanceRequest) => void;
-}) {
-  const [date, setDate] = useState(request?.date || "");
-  const [type, setType] = useState<RequestType>(request?.type || "휴가");
-  const [reason, setReason] = useState(request?.reason || "");
-
-  // 모달이 열릴 때 request 데이터로 초기화
-  useState(() => {
-    if (open && request) {
-      setDate(request.date);
-      setType(request.type);
-      setReason(request.reason);
-    }
-  });
-  
-  if (!request) return null;
-
-  const handleSave = () => {
-    const updatedRequest: AttendanceRequest = {
-      ...request,
-      date,
-      type,
-      reason,
-    };
-    onSave(updatedRequest);
-    onClose();
-  };
-
+function ModalCloseBtn({ onClick, size = 20 }: { onClick: () => void; size?: number }) {
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="근태 신청 수정"
-      description={`${request.employeeName} 직원의 근태 신청 내역을 수정합니다.`}
-      width={600}
-    >
-      <div style={{ padding: 24 }}>
-        {/* 날짜 선택 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
-            신청 날짜
-          </label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              border: `1px solid ${C.border}`,
-              borderRadius: 3,
-              fontSize: 12,
-              fontFamily: "'Inter', sans-serif",
-            }}
-          />
-        </div>
-
-        {/* 유형 선택 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
-            신청 유형
-          </label>
-          <div style={{ display: "flex", gap: 10 }}>
-            {(["휴가", "SL", "연차"] as RequestType[]).map(t => (
-              <label
-                key={t}
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  padding: "10px 14px",
-                  border: `2px solid ${type === t ? C.gold : C.border}`,
-                  borderRadius: 4,
-                  cursor: "pointer",
-                  backgroundColor: type === t ? C.goldBg : C.white,
-                }}
-              >
-                <input
-                  type="radio"
-                  name="type"
-                  value={t}
-                  checked={type === t}
-                  onChange={(e) => setType(e.target.value as RequestType)}
-                  style={{ cursor: "pointer" }}
-                />
-                <span style={{ fontSize: 12, fontWeight: 600, color: type === t ? "#7A5518" : C.charcoal }}>
-                  {t}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* 사유 입력 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.charcoal, marginBottom: 8 }}>
-            사유
-          </label>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="신청 사유를 입력해주세요 (선택사항)"
-            rows={3}
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              border: `1px solid ${C.border}`,
-              borderRadius: 3,
-              fontSize: 12,
-              fontFamily: "'Inter', sans-serif",
-              resize: "vertical",
-            }}
-          />
-        </div>
-
-        {/* 기존 정보 표시 */}
-        <div style={{
-          padding: 14,
-          backgroundColor: C.bg,
-          borderRadius: 4,
-          border: `1px solid ${C.border}`,
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, marginBottom: 8 }}>
-            기존 신청 정보
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 10, color: C.charcoal }}>
-            <div>
-              <div style={{ color: C.muted, marginBottom: 4 }}>날짜</div>
-              <div style={{ fontWeight: 600, color: C.navy }}>{request.date}</div>
-            </div>
-            <div>
-              <div style={{ color: C.muted, marginBottom: 4 }}>유형</div>
-              <div style={{ fontWeight: 600, color: C.navy }}>{request.type}</div>
-            </div>
-            <div>
-              <div style={{ color: C.muted, marginBottom: 4 }}>상태</div>
-              <div style={{ fontWeight: 600, color: C.navy }}>{request.status}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{
-        padding: "16px 24px",
-        borderTop: `1px solid ${C.border}`,
-        display: "flex",
-        justifyContent: "flex-end",
-        gap: 10,
-        backgroundColor: "#FAFAF8",
-      }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "9px 20px",
-            backgroundColor: C.white,
-            color: C.charcoal,
-            border: `1px solid ${C.border}`,
-            borderRadius: 3,
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          취소
-        </button>
-        <button
-          onClick={handleSave}
-          style={{
-            padding: "9px 24px",
-            backgroundColor: C.navy,
-            color: "#EAE0CC",
-            border: "none",
-            borderRadius: 3,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          저장
-        </button>
-      </div>
-    </Modal>
+    <button onClick={onClick} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: C.muted }}>
+      <X size={size} />
+    </button>
   );
 }
 
-/* ══════════════════════════════════════════════════════════
-   직원별 신청 상세 검토 모달
-══════════════════════════════════════════════════════════ */
-function EmployeeDetailModal({
-  open,
-  onClose,
-  summary,
-  onEdit,
-}: {
-  open: boolean;
-  onClose: () => void;
-  summary?: EmployeeSummary;
-  onEdit: (request: AttendanceRequest) => void;
-}) {
-  if (!summary) return null;
-
+function OutlineBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={`${summary.employeeName} 직원 근태 신청 상세`}
-      description={`총 ${summary.totalRequests}건의 신청 내역 및 자동 반영 결과입니다.`}
-      width={900}
+    <button
+      onClick={onClick}
+      style={{ padding: "10px 22px", backgroundColor: "transparent", border: `1px solid ${C.border}`, borderRadius: "6px", fontSize: "14px", fontWeight: 500, color: C.charcoal, cursor: "pointer" }}
     >
-      <div style={{ padding: 24 }}>
-        {/* 직원 정보 요약 */}
-        <div style={{
-          padding: 16,
-          backgroundColor: C.bg,
-          borderRadius: 4,
-          marginBottom: 20,
-        }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-            <div>
-              <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>직원명</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>{summary.employeeName}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>총 신청 건수</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.charcoal }}>{summary.totalRequests}건</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>미반영 건수</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: summary.notReflected > 0 ? C.risk : C.ok }}>
-                {summary.notReflected}건
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 직원 휴가/연차 잔여 */}
-        <div style={{
-          padding: 16,
-          backgroundColor: C.okBg,
-          border: `1px solid ${C.okBorder}`,
-          borderRadius: 4,
-          marginBottom: 20,
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: C.ok, marginBottom: 12 }}>
-            직원 잔여 수량 <span style={{ fontSize: 10, fontWeight: 400, color: C.charcoal }}>(직원 입력 기준)</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 10, color: C.charcoal, marginBottom: 4 }}>휴가 잔여</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
-                {summary.vacationTotal}일 중 {summary.vacation}일
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: C.charcoal, marginBottom: 4 }}>연차 잔여</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
-                {summary.annualLeaveTotal}일 중 {summary.annualLeave}일
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 날짜별 신청 내역 테이블 */}
-        <div style={{
-          border: `1px solid ${C.border}`,
-          borderRadius: 4,
-          overflow: "hidden",
-        }}>
-          <div style={{
-            padding: "12px 16px",
-            backgroundColor: "#F7F4EF",
-            borderBottom: `1px solid ${C.border}`,
-          }}>
-            <h4 style={{ fontSize: 12, fontWeight: 600, color: C.navy, fontFamily: "'Inter', sans-serif" }}>
-              날짜별 신청 상세
-            </h4>
-          </div>
-
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>날짜</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>신청 유형</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>최종 반영</th>
-                <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>사유</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>상태</th>
-                <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>반영 사유</th>
-                <th style={{ padding: "10px 14px", textAlign: "center", fontSize: 9, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#FAFAF8" }}>관리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.requests.map((req, i) => {
-                const rowBg = i % 2 === 1 ? C.rowAlt : C.white;
-                return (
-                  <tr key={req.id}>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11, fontWeight: 600, color: C.navy, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                      {req.date}
-                    </td>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
-                      {getTypeBadge(req.type)}
-                    </td>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
-                      {req.finalType ? getFinalTypeBadge(req.finalType, req.type) : <span style={{ fontSize: 10, color: C.muted }}>대기중</span>}
-                    </td>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 10, color: C.charcoal, backgroundColor: rowBg }}>
-                      {req.reason || "-"}
-                    </td>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
-                      {getStatusBadge(req.status)}
-                    </td>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 10, color: C.charcoal, backgroundColor: rowBg, lineHeight: 1.5 }}>
-                      {req.autoNote || req.conflictNote || "-"}
-                    </td>
-                    <td style={{ padding: "10px 14px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
-                      <button
-                        onClick={() => onEdit(req)}
-                        style={{
-                          padding: "4px 10px",
-                          backgroundColor: "transparent",
-                          color: C.navy,
-                          border: `1px solid ${C.navy}`,
-                          borderRadius: 3,
-                          fontSize: 10,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          fontFamily: "'Inter', sans-serif",
-                        }}
-                      >
-                        수정
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div style={{
-        padding: "16px 24px",
-        borderTop: `1px solid ${C.border}`,
-        display: "flex",
-        justifyContent: "flex-end",
-        backgroundColor: "#FAFAF8",
-      }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "9px 20px",
-            backgroundColor: C.white,
-            color: C.charcoal,
-            border: `1px solid ${C.border}`,
-            borderRadius: 3,
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          닫기
-        </button>
-      </div>
-    </Modal>
+      {children}
+    </button>
   );
 }
 
-/* ══════════════════════════════════════════════════════════
-   MAIN PAGE
-══════════════════════════════════════════════════════════ */
-export default function AttendancePage() {
-  const [requests, setRequests] = useState<AttendanceRequest[]>(MOCK_REQUESTS);
-  const [balances] = useState<EmployeeBalance[]>(INITIAL_BALANCES);
-  const [selectedYear, setSelectedYear] = useState(2026);
-  const [selectedMonth, setSelectedMonth] = useState(4);
-  const [selectedSummary, setSelectedSummary] = useState<EmployeeSummary | undefined>();
-  const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editingRequest, setEditingRequest] = useState<AttendanceRequest | null>(null);
-  const [updateSuccess, setUpdateSuccess] = useState(false);
-
-  // 필터
-  const [filterStatus, setFilterStatus] = useState<"전체" | "미반영" | "완료">("전체");
-
-  const handleRowClick = (summary: EmployeeSummary) => {
-    setSelectedSummary(summary);
-    setDetailModalOpen(true);
-  };
-  
-  const handleEditRequest = (request: AttendanceRequest) => {
-    setEditingRequest(request);
-    setEditModalOpen(true);
-  };
-  
-  const handleSaveRequest = (updatedRequest: AttendanceRequest) => {
-    // 기존 건 업데이트 (신규 추가 X)
-    setRequests(prev => 
-      prev.map(req => 
-        req.id === updatedRequest.id ? updatedRequest : req
-      )
-    );
-    
-    // 성공 피드백 표시
-    setUpdateSuccess(true);
-    setTimeout(() => setUpdateSuccess(false), 3000);
-    
-    // 상세 모달의 summary도 업데이트
-    if (selectedSummary) {
-      const updatedSummary = {
-        ...selectedSummary,
-        requests: selectedSummary.requests.map(req =>
-          req.id === updatedRequest.id ? updatedRequest : req
-        ),
-      };
-      setSelectedSummary(updatedSummary);
-    }
-  };
-
-  // 직원별 그룹화
-  const employeeSummaries = groupByEmployee(requests, balances);
-
-  // 필터링
-  const filteredSummaries = employeeSummaries.filter(summary => {
-    if (filterStatus === "미반영" && summary.notReflected === 0) return false;
-    if (filterStatus === "완료" && summary.notReflected > 0) return false;
-    return true;
-  });
-
-  // 전체 통계
-  const totalAutoCompleted = requests.filter(r => r.status === "자동 반영 완료").length;
-  const totalReviewNeeded = requests.filter(r => r.status === "검토 필요").length;
-  const totalCannotReflect = requests.filter(r => r.status === "반영 불가").length;
-  const totalConflict = requests.filter(r => r.conflictNote).length;
-  const employeesWithNotReflected = employeeSummaries.filter(s => s.notReflected > 0).length;
-
+function StatCard({ label, value, color, tooltip }: { label: string; value: number; color: string; tooltip?: string }) {
   return (
-    <AppLayout>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: C.bg }}>
-        {/* 헤더 */}
-        <div style={{
-          backgroundColor: C.white,
-          borderBottom: `1px solid ${C.border}`,
-          padding: "20px 40px",
-          flexShrink: 0,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div>
-              <h1 style={{ fontSize: 22, fontWeight: 600, color: C.navy, fontFamily: "'Cormorant Garamond', serif" }}>
-                근태 관리
-              </h1>
-            </div>
-          </div>
+    <div style={{ backgroundColor: C.white, border: `1px solid ${C.border}`, borderRadius: "8px", padding: "20px" }}>
+      <div style={{ fontSize: "12px", fontWeight: 600, color: C.muted, letterSpacing: "0.03em", textTransform: "uppercase", marginBottom: "8px" }}>{label}</div>
+      <div style={{ fontSize: "28px", fontWeight: 700, color, fontFamily: "'Cormorant Garamond', serif" }}>{value}</div>
+      {tooltip && <div style={{ fontSize: "11px", color: C.muted, marginTop: "6px", lineHeight: 1.4 }}>{tooltip}</div>}
+    </div>
+  );
+}
 
-          {/* 기간 및 요약 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                style={{
-                  padding: "7px 12px",
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 3,
-                  fontSize: 11.5,
-                  backgroundColor: C.white,
-                  fontFamily: "'Inter', sans-serif",
-                }}
-              >
-                <option value={2025}>2025년</option>
-                <option value={2026}>2026년</option>
-                <option value={2027}>2027년</option>
-              </select>
+function IntentionBadge({ intention }: { intention: RequestIntention }) {
+  const s: Record<RequestIntention, { bg: string; border: string; text: string }> = {
+    "쉬는 날 희망": { bg: C.pendingBg, border: C.pendingBorder, text: C.pending },
+    "주말 근무 희망": { bg: C.okBg, border: C.okBorder, text: C.ok },
+    "공휴 근무 희망": { bg: C.okBg, border: C.okBorder, text: C.ok },
+    "신청 없음": { bg: "rgba(123,131,144,0.08)", border: "rgba(123,131,144,0.2)", text: C.muted },
+    "휴가 신청": { bg: C.goldBg, border: C.goldBorder, text: C.gold },
+    "교육 신청": { bg: "#E8F3FA", border: "#A8CEE8", text: "#1A5A8A" },
+    "병가 신청": { bg: "#FFF0E6", border: "#FFB380", text: "#CC5500" },
+  };
+  const style = s[intention];
+  return (
+    <span style={{ display: "inline-block", padding: "4px 10px", fontSize: "11px", fontWeight: 600, backgroundColor: style.bg, border: `1px solid ${style.border}`, borderRadius: "4px", color: style.text }}>
+      {intention}
+    </span>
+  );
+}
 
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                style={{
-                  padding: "7px 12px",
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 3,
-                  fontSize: 11.5,
-                  backgroundColor: C.white,
-                  fontFamily: "'Inter', sans-serif",
-                }}
-              >
-                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                  <option key={m} value={m}>{m}월</option>
-                ))}
-              </select>
-            </div>
+function FinalTypeBadge({ finalType }: { finalType?: FinalType }) {
+  if (!finalType) return <span style={{ fontSize: "12px", color: C.muted }}>-</span>;
+  const s: Record<FinalType, { bg: string; border: string; text: string }> = {
+    "휴가":  { bg: C.goldBg,    border: C.goldBorder,    text: C.gold },
+    "SL":   { bg: C.okBg,      border: C.okBorder,      text: C.ok },
+    "연차":  { bg: C.pendingBg, border: C.pendingBorder, text: C.pending },
+    "EDU":  { bg: "#E8F3FA",   border: "#A8CEE8",       text: "#1A5A8A" },
+    "SICK": { bg: "#FFF0E6",   border: "#FFB380",       text: "#CC5500" },
+    "미반영": { bg: C.riskBg,  border: C.riskBorder,    text: C.risk },
+  };
+  const style = s[finalType];
+  return (
+    <span style={{ display: "inline-block", padding: "4px 10px", fontSize: "11px", fontWeight: 600, backgroundColor: style.bg, border: `1px solid ${style.border}`, borderRadius: "4px", color: style.text }}>
+      {finalType}
+    </span>
+  );
+}
 
-            {/* 운영 결과 요약 */}
-            <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, color: C.muted }}>자동 반영 완료</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.ok }}>{totalAutoCompleted}건</span>
-              </div>
-              <div style={{ width: 1, height: 16, backgroundColor: C.border }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, color: C.muted }}>검토 필요</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.warning }}>{totalReviewNeeded}건</span>
-              </div>
-              <div style={{ width: 1, height: 16, backgroundColor: C.border }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, color: C.muted }}>반영 불가</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.risk }}>{totalCannotReflect}건</span>
-              </div>
-              <div style={{ width: 1, height: 16, backgroundColor: C.border }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, color: C.muted }}>운영 충돌</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.charcoal }}>{totalConflict}건</span>
-              </div>
-              <div style={{ width: 1, height: 16, backgroundColor: C.border }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, color: C.muted }}>미반영 직원</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.risk }}>{employeesWithNotReflected}명</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 필터 탭 */}
-          <div style={{ display: "flex", gap: 8, marginTop: 16, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-            {(["전체", "미반영", "완료"] as const).map(status => {
-              const isActive = filterStatus === status;
-              return (
-                <button
-                  key={status}
-                  onClick={() => setFilterStatus(status)}
-                  style={{
-                    padding: "7px 16px",
-                    backgroundColor: isActive ? C.navy : C.white,
-                    color: isActive ? "#EAE0CC" : C.charcoal,
-                    border: `1px solid ${isActive ? C.navy : C.border}`,
-                    borderRadius: 3,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                >
-                  {status}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 메인 콘텐츠 */}
-        <div style={{ flex: 1, overflow: "auto", padding: "24px 40px" }}>
-          <div style={{
-            backgroundColor: C.white,
-            border: `1px solid ${C.border}`,
-            borderRadius: 4,
-            overflow: "auto",
-          }}>
-            <div style={{
-              padding: "16px 20px",
-              borderBottom: `1px solid ${C.border}`,
-              backgroundColor: "#F7F4EF",
-            }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: C.navy, fontFamily: "'Inter', sans-serif" }}>
-                직원별 근태 신청 요약
-              </h3>
-            </div>
-
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>직원명</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>신청 건수</th>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>신청 날짜</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>신청 유형</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>반영 현황</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>휴가 잔여</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>연차 잔여</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, backgroundColor: "#F7F4EF" }}>관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSummaries.map((summary, i) => {
-                  const rowBg = i % 2 === 1 ? C.rowAlt : C.white;
-                  const typesStr = Object.entries(summary.types)
-                    .map(([type, count]) => `${type} ${count}건`)
-                    .join(", ");
-
-                  return (
-                    <tr key={summary.employeeId}>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 12, fontWeight: 600, color: C.navy, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                        {summary.employeeName}
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", fontSize: 11, fontWeight: 600, color: C.charcoal, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                        총 {summary.totalRequests}건
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 10, color: C.charcoal, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                        {formatDatesSummary(summary.dates)}
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", fontSize: 10, color: C.charcoal, backgroundColor: rowBg }}>
-                        {typesStr}
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", fontSize: 10, color: C.charcoal, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-                            {summary.autoCompleted > 0 && (
-                              <span style={{ color: C.ok, fontWeight: 600 }}>완료 {summary.autoCompleted}</span>
-                            )}
-                            {summary.reviewNeeded > 0 && (
-                              <span style={{ color: C.warning, fontWeight: 600 }}>검토 {summary.reviewNeeded}</span>
-                            )}
-                            {summary.cannotReflect > 0 && (
-                              <span style={{ color: C.risk, fontWeight: 600 }}>불가 {summary.cannotReflect}</span>
-                            )}
-                          </div>
-                          {summary.notReflected > 0 && (
-                            <div style={{
-                              padding: "2px 8px",
-                              backgroundColor: C.riskBg,
-                              border: `1px solid ${C.riskBorder}`,
-                              borderRadius: 2,
-                              fontSize: 9,
-                              fontWeight: 600,
-                              color: C.risk,
-                            }}>
-                              미반영 {summary.notReflected}건
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", fontSize: 10, color: C.charcoal, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                        {summary.vacationTotal}일 중 {summary.vacation}일
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", fontSize: 10, color: C.charcoal, backgroundColor: rowBg, fontFamily: "'Inter', sans-serif" }}>
-                        {summary.annualLeaveTotal}일 중 {summary.annualLeave}일
-                      </td>
-                      <td style={{ padding: "12px 16px", borderBottom: `1px solid ${C.borderLight}`, textAlign: "center", backgroundColor: rowBg }}>
-                        <button
-                          onClick={() => handleRowClick(summary)}
-                          style={{
-                            padding: "5px 12px",
-                            backgroundColor: "transparent",
-                            color: C.navy,
-                            border: `1px solid ${C.navy}`,
-                            borderRadius: 3,
-                            fontSize: 10,
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            fontFamily: "'Inter', sans-serif",
-                          }}
-                        >
-                          상세 검토
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-
-            {filteredSummaries.length === 0 && (
-              <div style={{
-                padding: "60px 20px",
-                textAlign: "center",
-                color: C.muted,
-                fontSize: 13,
-              }}>
-                해당 조건의 직원이 없습니다.
-              </div>
-            )}
-          </div>
-
-          {/* 안내 */}
-          <div style={{
-            marginTop: 24,
-            padding: 16,
-            backgroundColor: C.white,
-            border: `1px solid ${C.border}`,
-            borderRadius: 4,
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.navy, marginBottom: 10 }}>
-              근태 관리 안내
-            </div>
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: C.charcoal, lineHeight: 1.8 }}>
-              <li>직원별로 여러 날짜 신청을 묶어서 관리할 수 있습니다.</li>
-              <li>직원 신청은 자동으로 운영 조건을 검토하여 반영 여부가 결정됩니다.</li>
-              <li>14일 4휴무 규칙 우선 반영으로 신청 유형과 실제 반영 유형이 다를 수 있습니다.</li>
-              <li>미반영 건수는 검토 필요 + 반영 불가 건수의 합계입니다.</li>
-              <li>상세 검토 버튼을 누르면 해당 직원의 날짜별 신청 상세를 확인할 수 있습니다.</li>
-              <li>직원별 휴가/연차 잔여는 테이블에서 바로 확인 가능하며, 상세 검토에서 더 자세히 확인할 수 있습니다.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      {/* 직원별 상세 검토 모달 */}
-      <EmployeeDetailModal
-        open={detailModalOpen}
-        onClose={() => setDetailModalOpen(false)}
-        summary={selectedSummary}
-        onEdit={handleEditRequest}
-      />
-      
-      {/* 근태 신청 수정 모달 */}
-      <RequestEditModal
-        open={editModalOpen}
-        onClose={() => setEditModalOpen(false)}
-        request={editingRequest}
-        onSave={handleSaveRequest}
-      />
-      
-      {/* 성공 피드백 */}
-      {updateSuccess && (
-        <div style={{
-          position: "fixed",
-          bottom: 20,
-          left: "50%",
-          transform: "translateX(-50%)",
-          padding: "10px 20px",
-          backgroundColor: C.okBg,
-          color: C.ok,
-          border: `1px solid ${C.okBorder}`,
-          borderRadius: 3,
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: "pointer",
-          fontFamily: "'Inter', sans-serif",
-          zIndex: 1001,
-        }}>
-          수정이 성공적으로 저장되었습니다.
-        </div>
-      )}
-    </AppLayout>
+function StatusBadge({ status }: { status: RequestStatus }) {
+  const s: Partial<Record<RequestStatus, { bg: string; border: string; text: string }>> = {
+    "신청 접수":      { bg: C.pendingBg, border: C.pendingBorder, text: C.pending },
+    "자동 반영 가능": { bg: C.okBg,      border: C.okBorder,      text: C.ok },
+    "자동 반영 완료": { bg: C.okBg,      border: C.okBorder,      text: C.ok },
+    "관리자 조정 필요": { bg: C.warnBg,  border: C.warnBorder,    text: C.warning },
+    "관리자 조정 완료": { bg: C.okBg,    border: C.okBorder,      text: C.ok },
+    "미반영":         { bg: C.riskBg,   border: C.riskBorder,    text: C.risk },
+    "승인 대기":      { bg: C.warnBg,   border: C.warnBorder,    text: C.warning },
+    "승인 완료":      { bg: C.okBg,     border: C.okBorder,      text: C.ok },
+    "반려":           { bg: C.riskBg,   border: C.riskBorder,    text: C.risk },
+    "신청 취소":      { bg: C.riskBg,   border: C.riskBorder,    text: C.risk },
+    "검토 필요":      { bg: C.warnBg,   border: C.warnBorder,    text: C.warning },
+    "반영 불가":      { bg: C.riskBg,   border: C.riskBorder,    text: C.risk },
+  };
+  const style = s[status] ?? { bg: C.pendingBg, border: C.pendingBorder, text: C.pending };
+  return (
+    <span style={{ display: "inline-block", padding: "4px 8px", fontSize: "10px", fontWeight: 600, backgroundColor: style.bg, border: `1px solid ${style.border}`, borderRadius: "3px", color: style.text }}>
+      {status}
+    </span>
   );
 }

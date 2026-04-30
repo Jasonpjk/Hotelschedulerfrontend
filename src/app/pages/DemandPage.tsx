@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type React from "react";
 import AppLayout from "../components/layout/AppLayout";
+import DemandForecastTable from "../components/DemandForecastTable";
 
 /* ══════════════════════════════════════════════════════════
    COLOR TOKENS
@@ -32,7 +33,7 @@ const C = {
   rowAlt:      "#FAFAF8",
 };
 
-/* ══════════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════
    CALENDAR — 2026년 4월
 ══════════════════════════════════════════════════════════ */
 const APRIL_DAYS = 30;
@@ -115,10 +116,24 @@ function buildData(): DayData[] {
     const peakCI = finalCI >= (wknd ? 74 : 46);
     const peakCO = finalCO >= (wknd ? 68 : 42);
     
+    // 중간조 배치: 피크 정도에 따라 여러 명 배치 가능
     let midShiftTimes: string[] = [];
-    if (peakCI && finalCI >= 70) midShiftTimes.push("C08");
-    else if (peakCI && finalCI >= 60) midShiftTimes.push("C09");
-    else if (peakCO && finalCO >= 65) midShiftTimes.push("C10");
+    if (peakCI && peakCO && finalCI >= 80) {
+      // 매우 높은 피크: 3~4명 배치
+      midShiftTimes.push("C08", "C09", "C10");
+      if (finalCI >= 90) midShiftTimes.push("C11");
+    } else if (peakCI && finalCI >= 70) {
+      // 높은 피크: 2~3명 배치
+      midShiftTimes.push("C08", "C09");
+      if (finalCI >= 75) midShiftTimes.push("C10");
+    } else if (peakCI && finalCI >= 60) {
+      // 보통 피크: 1~2명 배치
+      midShiftTimes.push("C09");
+      if (finalCI >= 65) midShiftTimes.push("C10");
+    } else if (peakCO && finalCO >= 65) {
+      // CO 피크만 있는 경우
+      midShiftTimes.push("C10");
+    }
 
     rows.push({
       day: d, dow, week,
@@ -167,7 +182,7 @@ function Badge({ label, variant }: { label: string; variant: "ok" | "warn" | "ri
   );
 }
 
-/* ══════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════
    모달 컴포넌트
 ══════════════════════════════════════════════════════════ */
 function Modal({ 
@@ -664,183 +679,15 @@ function ForecastResultTab({ showCalendar }: { showCalendar: boolean }) {
               backgroundColor: C.white, 
               border: `1px solid ${C.border}`, 
               borderRadius: 4, 
-              position: "relative",
               overflow: "auto", 
               maxHeight: 600 
             }}>
-              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1200 }}>
-                <thead>
-                  <tr>
-                    <th rowSpan={2} style={{ 
-                      position: "sticky", 
-                      left: 0, 
-                      top: 0, 
-                      zIndex: 100, 
-                      padding: "10px 16px", 
-                      textAlign: "center", 
-                      fontSize: 9.5, 
-                      fontWeight: 600, 
-                      color: C.muted, 
-                      letterSpacing: "0.06em", 
-                      textTransform: "uppercase", 
-                      borderBottom: `1px solid ${C.border}`, 
-                      borderRight: `1px solid ${C.border}`,
-                      whiteSpace: "nowrap", 
-                      backgroundColor: "#F7F4EF",
-                      boxShadow: "2px 0 4px rgba(0,0,0,0.05)"
-                    }}>
-                      날짜
-                    </th>
-                    <th colSpan={7} style={{ 
-                      position: "sticky", 
-                      top: 0, 
-                      zIndex: 50, 
-                      padding: "10px 16px", 
-                      textAlign: "center", 
-                      fontSize: 9.5, 
-                      fontWeight: 600, 
-                      color: C.muted, 
-                      letterSpacing: "0.06em", 
-                      textTransform: "uppercase", 
-                      borderBottom: `1px solid ${C.border}`, 
-                      whiteSpace: "nowrap", 
-                      backgroundColor: "#F7F4EF" 
-                    }}>
-                      체크인 (CI)
-                    </th>
-                    <th colSpan={7} style={{ 
-                      position: "sticky", 
-                      top: 0, 
-                      zIndex: 50, 
-                      padding: "10px 16px", 
-                      textAlign: "center", 
-                      fontSize: 9.5, 
-                      fontWeight: 600, 
-                      color: C.muted, 
-                      letterSpacing: "0.06em", 
-                      textTransform: "uppercase", 
-                      borderBottom: `1px solid ${C.border}`, 
-                      whiteSpace: "nowrap", 
-                      backgroundColor: "#F7F4EF" 
-                    }}>
-                      체크아웃 (CO)
-                    </th>
-                    <th rowSpan={2} style={{ 
-                      position: "sticky", 
-                      top: 0, 
-                      zIndex: 50, 
-                      padding: "10px 16px", 
-                      textAlign: "center", 
-                      fontSize: 9.5, 
-                      fontWeight: 600, 
-                      color: C.muted, 
-                      letterSpacing: "0.06em", 
-                      textTransform: "uppercase", 
-                      borderBottom: `1px solid ${C.border}`, 
-                      whiteSpace: "nowrap", 
-                      backgroundColor: "#F7F4EF" 
-                    }}>
-                      피크
-                    </th>
-                    <th rowSpan={2} style={{ 
-                      position: "sticky", 
-                      top: 0, 
-                      zIndex: 50, 
-                      padding: "10px 16px", 
-                      textAlign: "center", 
-                      fontSize: 9.5, 
-                      fontWeight: 600, 
-                      color: C.muted, 
-                      letterSpacing: "0.06em", 
-                      textTransform: "uppercase", 
-                      borderBottom: `1px solid ${C.border}`, 
-                      whiteSpace: "nowrap", 
-                      backgroundColor: "#F7F4EF" 
-                    }}>
-                      중간조 배치
-                    </th>
-                  </tr>
-                  <tr>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>현재 예약</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>전년 예약</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>전년 실제</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>픽업</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>예측</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>보정</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>최종</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>현재 예약</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>전년 예약</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>전년 실제</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>픽업</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>예측</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>보정</th>
-                    <th style={{ position: "sticky", top: 43, zIndex: 50, padding: "8px 13px", textAlign: "center", fontSize: 9.5, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", backgroundColor: "#F7F4EF" }}>최종</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(activeWeek === 0 ? DATA : weekData).map((row, i) => {
-                    const rowBg = i % 2 === 1 ? C.rowAlt : C.white;
-                    const dayBg = isSun(row.day) ? C.sunBg : isSat(row.day) ? C.satBg : rowBg;
-                    const holiday = getHoliday(row.day);
-                    
-                    return (
-                      <tr key={row.day} style={{ backgroundColor: dayBg }}>
-                        <td style={{ 
-                          position: "sticky", 
-                          left: 0, 
-                          zIndex: 10, 
-                          padding: "9px 16px", 
-                          borderBottom: `1px solid ${C.borderLight}`,
-                          borderRight: `1px solid ${C.border}`,
-                          fontSize: 11.5, 
-                          verticalAlign: "middle", 
-                          textAlign: "center", 
-                          fontWeight: 600, 
-                          color: C.charcoal, 
-                          backgroundColor: dayBg,
-                          boxShadow: "2px 0 4px rgba(0,0,0,0.05)"
-                        }}>
-                          <div>4월 {row.day}일 ({row.dow})</div>
-                          {holiday && (
-                            <div style={{ 
-                              fontSize: 9, 
-                              color: C.risk, 
-                              fontWeight: 500, 
-                              marginTop: 2 
-                            }}>
-                              {holiday}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", color: C.charcoal }}>{row.curBookCI}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", color: C.muted }}>{row.lyBookCI}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", color: C.muted }}>{row.lyActualCI}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: C.ok }}>+{row.pickupCI}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: C.navy }}>{row.forecastCI}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center" }}>
-                          {row.eventAdj > 0 ? <Badge label={`+${row.eventAdj}`} variant="gold" /> : <span style={{ color: C.muted, fontSize: 10 }}>—</span>}
-                        </td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 12.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: C.navy }}>{row.finalCI}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", color: C.charcoal }}>{row.curBookCO}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", color: C.muted }}>{row.lyBookCO}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", color: C.muted }}>{row.lyActualCO}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: C.ok }}>+{row.pickupCO}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: C.navy }}>{row.forecastCO}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center" }}>
-                          {row.eventAdjCO > 0 ? <Badge label={`+${row.eventAdjCO}`} variant="gold" /> : <span style={{ color: C.muted, fontSize: 10 }}>—</span>}
-                        </td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 12.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: C.navy }}>{row.finalCO}</td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center" }}>
-                          {row.peakCI && row.peakCO ? <Badge label="CI·CO 피크" variant="risk" /> : row.peakCI ? <Badge label="CI 피크" variant="risk" /> : row.peakCO ? <Badge label="CO 피크" variant="warn" /> : <span style={{ color: C.muted, fontSize: 10 }}>—</span>}
-                        </td>
-                        <td style={{ padding: "9px 13px", borderBottom: `1px solid ${C.borderLight}`, fontSize: 11.5, verticalAlign: "middle", textAlign: "center", fontWeight: 600, color: row.midShiftTimes.length > 0 ? C.ok : C.muted }}>
-                          {row.midShiftTimes.length > 0 ? row.midShiftTimes.join(", ") : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <DemandForecastTable 
+                data={activeWeek === 0 ? DATA : weekData}
+                getHoliday={getHoliday}
+                isSun={isSun}
+                isSat={isSat}
+              />
             </div>
 
             <div style={{ marginTop: 32, padding: 24, backgroundColor: "#F7F4EF", border: `1px solid ${C.border}`, borderRadius: 4 }}>
@@ -999,25 +846,15 @@ function AdjustItem({ label, value, description }: { label: string; value: strin
 export default function DemandPage() {
   const [activeTab, setActiveTab] = useState<"basis" | "result">("basis");
   const [showCalendar, setShowCalendar] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState("2026년 4월");
-  const [selectedPeriod, setSelectedPeriod] = useState("1개월 전");
+  const [selectedYear, setSelectedYear] = useState(2026);
+  const [selectedMonth, setSelectedMonth] = useState(4);
   const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
-  const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
+  const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
 
   const handleGenerateForecast = () => {
     setShowCalendar(true);
     setActiveTab("result");
   };
-
-  // 작업 월 옵션
-  const monthOptions = [
-    "2026년 1월", "2026년 2월", "2026년 3월", "2026년 4월",
-    "2026년 5월", "2026년 6월", "2026년 7월", "2026년 8월",
-    "2026년 9월", "2026년 10월", "2026년 11월", "2026년 12월"
-  ];
-
-  // 작업 시점 옵션
-  const periodOptions = Array.from({ length: 12 }, (_, i) => `${i + 1}개월 전`);
 
   // 우측 상단 버튼 활성화 여부
   const buttonsEnabled = activeTab === "result";
@@ -1025,132 +862,62 @@ export default function DemandPage() {
   return (
     <AppLayout>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: C.bg }}>
+        {/* 헤더 */}
         <div style={{
           backgroundColor: C.white,
           borderBottom: `1px solid ${C.border}`,
-          padding: "24px 40px 20px",
+          padding: "20px 40px",
           flexShrink: 0,
         }}>
-          {/* 제목 */}
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <h1 style={{ fontSize: 24, fontWeight: 600, color: C.navy, fontFamily: "'Cormorant Garamond', serif" }}>
-              월별 수요 예측
-            </h1>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <div>
+              <h1 style={{ fontSize: 22, fontWeight: 600, color: C.navy, fontFamily: "'Cormorant Garamond', serif" }}>
+                수요 예측
+              </h1>
+            </div>
           </div>
 
-          {/* 제어 영역 */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            {/* 좌측: 작업 월 + 작업 시점 드롭다운 */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              {/* 작업 월 드롭다운 */}
-              <div style={{ position: "relative" }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
-                  작업 월
-                </div>
-                <button
-                  onClick={() => setMonthDropdownOpen(!monthDropdownOpen)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 14px", border: `1px solid ${C.border}`,
-                    borderRadius: 3, background: C.white, cursor: "pointer",
-                    fontSize: 12, color: C.charcoal, fontWeight: 500,
-                    letterSpacing: "0.01em", transition: "border-color 0.15s",
-                    minWidth: 140,
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.gold)}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}
-                >
-                  {selectedMonth}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="2" strokeLinecap="round"
-                    style={{ transition: "transform 0.2s", transform: monthDropdownOpen ? "rotate(180deg)" : "rotate(0)", marginLeft: "auto" }}>
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-                {monthDropdownOpen && (
-                  <div style={{
-                    position: "absolute", top: "calc(100% + 6px)", left: 0,
-                    backgroundColor: C.white, border: `1px solid ${C.border}`,
-                    borderRadius: 3, boxShadow: "0 8px 24px rgba(0,0,0,0.09)",
-                    minWidth: 140, zIndex: 100, maxHeight: 240, overflow: "auto",
-                  }}>
-                    {monthOptions.map((month) => (
-                      <button
-                        key={month}
-                        onClick={() => { setSelectedMonth(month); setMonthDropdownOpen(false); }}
-                        style={{
-                          display: "block", width: "100%", padding: "9px 14px",
-                          background: "none", border: "none", textAlign: "left",
-                          fontSize: 12, cursor: "pointer",
-                          borderLeft: month === selectedMonth ? `2px solid ${C.gold}` : "2px solid transparent",
-                          color: month === selectedMonth ? C.navy : C.charcoal,
-                          fontWeight: month === selectedMonth ? 500 : 400,
-                          backgroundColor: month === selectedMonth ? "rgba(185,155,90,0.05)" : "transparent",
-                        }}
-                        onMouseEnter={(e) => { if (month !== selectedMonth) (e.currentTarget as HTMLElement).style.backgroundColor = "#F9F6F1"; }}
-                        onMouseLeave={(e) => { if (month !== selectedMonth) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
-                      >
-                        {month}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+          {/* 기간 및 컨트롤 */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            {/* 좌측: 년/월 선택 */}
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                style={{
+                  padding: "7px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 11.5,
+                  backgroundColor: C.white,
+                  fontFamily: "'Inter', sans-serif",
+                  cursor: "pointer",
+                  color: C.charcoal,
+                }}
+              >
+                <option value={2025}>2025년</option>
+                <option value={2026}>2026년</option>
+                <option value={2027}>2027년</option>
+              </select>
 
-              {/* 작업 시점 드롭다운 */}
-              <div style={{ position: "relative" }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.muted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
-                  작업 시점
-                </div>
-                <button
-                  onClick={() => setPeriodDropdownOpen(!periodDropdownOpen)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 14px", border: `1px solid ${C.border}`,
-                    borderRadius: 3, background: C.white, cursor: "pointer",
-                    fontSize: 12, color: C.charcoal, fontWeight: 500,
-                    letterSpacing: "0.01em", transition: "border-color 0.15s",
-                    minWidth: 120,
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.gold)}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}
-                >
-                  {selectedPeriod}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="2" strokeLinecap="round"
-                    style={{ transition: "transform 0.2s", transform: periodDropdownOpen ? "rotate(180deg)" : "rotate(0)", marginLeft: "auto" }}>
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-                {periodDropdownOpen && (
-                  <div style={{
-                    position: "absolute", top: "calc(100% + 6px)", left: 0,
-                    backgroundColor: C.white, border: `1px solid ${C.border}`,
-                    borderRadius: 3, boxShadow: "0 8px 24px rgba(0,0,0,0.09)",
-                    minWidth: 120, zIndex: 100, maxHeight: 240, overflow: "auto",
-                  }}>
-                    {periodOptions.map((period) => (
-                      <button
-                        key={period}
-                        onClick={() => { setSelectedPeriod(period); setPeriodDropdownOpen(false); }}
-                        style={{
-                          display: "block", width: "100%", padding: "9px 14px",
-                          background: "none", border: "none", textAlign: "left",
-                          fontSize: 12, cursor: "pointer",
-                          borderLeft: period === selectedPeriod ? `2px solid ${C.gold}` : "2px solid transparent",
-                          color: period === selectedPeriod ? C.navy : C.charcoal,
-                          fontWeight: period === selectedPeriod ? 500 : 400,
-                          backgroundColor: period === selectedPeriod ? "rgba(185,155,90,0.05)" : "transparent",
-                        }}
-                        onMouseEnter={(e) => { if (period !== selectedPeriod) (e.currentTarget as HTMLElement).style.backgroundColor = "#F9F6F1"; }}
-                        onMouseLeave={(e) => { if (period !== selectedPeriod) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
-                      >
-                        {period}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                style={{
+                  padding: "7px 12px",
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 3,
+                  fontSize: 11.5,
+                  backgroundColor: C.white,
+                  fontFamily: "'Inter', sans-serif",
+                  cursor: "pointer",
+                  color: C.charcoal,
+                }}
+              >
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                  <option key={m} value={m}>{m}월</option>
+                ))}
+              </select>
             </div>
 
             {/* 우측: 다운로드 / 이력 보기 버튼 */}

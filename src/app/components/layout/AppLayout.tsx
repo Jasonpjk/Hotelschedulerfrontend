@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { type Lang, LANGS, DT } from "../../i18n";
 import { LangContext } from "../../context/LangContext";
-import { HotelContext } from "../../context/HotelContext";
+import { useHotel } from "../../context/HotelContext";
+import { useAuth } from "../../context/AuthContext";
 import lotteLogo from "figma:asset/b5f675b5ca48c50750fc1b535604b775fca63344.png";
 import lotteBreadcrumbLogo from "figma:asset/5400b4c48b63489e4c64ed0d14cc058b70dca12a.png";
 
@@ -121,7 +122,10 @@ function navItems(t: typeof DT["ko"]) {
     { key: "request",   label: "근태 신청",     path: "/request",   icon: <RequestIcon /> },
     { key: "attendance", label: "근태 관리",    path: "/attendance", icon: <LeaveIcon /> },
     { key: "demand",    label: t.navDemand,    path: "/demand",    icon: <BarIcon /> },
+    { key: "annual-night-shift", label: "연간 야간 계획", path: "/annual-night-shift", icon: <MoonIcon /> },
+    { key: "redeployment", label: "스케줄 재생성", path: "/redeployment", icon: <RedeployIcon /> },
     { key: "settings",  label: t.navSettings,  path: "/settings",  icon: <GearIcon /> },
+    { key: "profile",   label: "개인설정",      path: "/profile",   icon: <UserIcon /> },
   ];
 }
 
@@ -146,13 +150,14 @@ const HOTELS = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   // 현재 시안: 한국어 고정. 향후 getLang()으로 교체하여 다국어 전환 연결 예정.
   const lang: Lang = "ko";
   const t = DT[lang];
   const nav = navItems(t);
 
-  const [hotel, setHotel] = useState(HOTELS[0]);
+  const { hotel, setHotel } = useHotel();
   const [hotelOpen, setHotelOpen] = useState(false);
   const hotelRef = useRef<HTMLDivElement>(null);
   const activePath = location.pathname;
@@ -167,7 +172,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <LangContext.Provider value={lang}>
-      <HotelContext.Provider value={hotel}>
         <div style={{ display: "flex", height: "100vh", fontFamily: "'Inter', sans-serif", backgroundColor: C.bg, overflow: "hidden" }}>
 
           {/* ── 사이드바 ───────────────────────────────────── */}
@@ -233,7 +237,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* 사용자 */}
             <div style={{ padding: "12px 10px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
               <button
-                onClick={() => navigate("/")}
+                onClick={() => { logout(); navigate("/"); }}
                 style={{
                   display: "flex", alignItems: "center", gap: 9,
                   width: "100%", padding: "8px 10px",
@@ -248,11 +252,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   backgroundColor: C.navyActive, border: `1px solid ${C.goldDim}`,
                   display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                 }}>
-                  <span style={{ fontSize: 10.5, color: C.gold, fontWeight: 500 }}>김</span>
+                  <span style={{ fontSize: 10.5, color: C.gold, fontWeight: 500 }}>
+                    {user?.full_name?.charAt(0) ?? "?"}
+                  </span>
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, color: "rgba(234,224,204,0.85)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    김재민
+                    {user?.full_name ?? ""}
                   </div>
                   <div style={{ fontSize: 10, color: C.goldDim, letterSpacing: "0.04em" }}>
                     {t.roleAdmin}
@@ -270,7 +276,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               height: 52, backgroundColor: C.white,
               borderBottom: `1px solid ${C.border}`,
               display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "0 24px", flexShrink: 0, zIndex: 10,
+              padding: "0 24px", flexShrink: 0, position: "relative", zIndex: 200,
             }}>
               {/* 좌: 브레드크럼 */}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -407,7 +413,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </div>
-      </HotelContext.Provider>
     </LangContext.Provider>
   );
 }
@@ -423,3 +428,6 @@ function GearIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fil
 function HotelIcon() { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>; }
 function BellIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>; }
 function GlobeIcon({ color = "currentColor" }: { color?: string }) { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>; }
+function RedeployIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-3.5" /></svg>; }
+function UserIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>; }
+function MoonIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>; }
